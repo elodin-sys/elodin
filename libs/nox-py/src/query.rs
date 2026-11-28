@@ -497,6 +497,7 @@ impl<G: ComponentGroup> Query<G> {
                 builder.vars.insert(id, array);
             }
         }
+        builder.written.extend(G::component_ids());
     }
 }
 

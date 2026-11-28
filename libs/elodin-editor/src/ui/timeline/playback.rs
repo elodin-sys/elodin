@@ -10,7 +10,9 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use impeller::types::{ComponentId, Timestamp};
-use impeller_bevy::{CurrentStreamId, SeriesFetchPriority, TelemetryCache};
+use impeller_bevy::{
+    ComponentSchemaRegistry, CurrentStreamId, SeriesFetchPriority, TelemetryCache,
+};
 use impeller_wkt::{CurrentTimestamp, DbConfig, EarliestTimestamp, LastUpdated};
 
 use super::{AutoFollowLatestState, LatestFollow, PlaybackSpeed};
@@ -20,8 +22,8 @@ pub const PLAYBACK_SPEED_PRESETS: [f64; 15] = [
     0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 20.0, 30.0, 40.0, 50.0, 100.0,
 ];
 
-/// A covered hole at least this long, with no subscribed sample inside it,
-/// is a discontinuity. Unread cache intervals are not holes in the recording.
+/// A hole at least this long, with no subscribed sample inside it, is a
+/// discontinuity the playhead jumps rather than sits in.
 const DISCONTINUITY_MICROS: i64 = 2_000_000;
 
 /// How many sample steps the gap scan may take per frame. The playhead's own
@@ -277,11 +279,18 @@ pub fn skip_discontinuities(
     region: Res<PlaybackRegion>,
     earliest: Res<EarliestTimestamp>,
     last_updated: Res<LastUpdated>,
+    schema: Res<ComponentSchemaRegistry>,
     mut current: ResMut<CurrentTimestamp>,
     mut index: ResMut<PlaybackDiscontinuities>,
 ) {
-    let imminent = imminent_gap(&cache, &priority.high, current.0.0);
+    // Native backfill loads every series from its start; the browser loads
+    // blocks near the playhead, so a span without samples may just be unread.
+    let read = |gap: &(i64, i64)| {
+        !cfg!(target_family = "wasm") || gap_was_read(&cache, &priority.high, &schema, *gap)
+    };
+    let imminent = imminent_gap(&cache, &priority.high, current.0.0).filter(read);
     index.scan(&cache, &priority.high);
+    index.gaps.retain(read);
     if !paused.0
         && !latest_follow.0
         && let Some((gap_start, end)) = imminent
@@ -330,19 +339,22 @@ fn imminent_gap(
     }
     match (prev_any, next_any) {
         (Some(prev), Some(next)) if next.saturating_sub(prev) >= DISCONTINUITY_MICROS => {
-            (now > prev && now < next && gap_is_covered(cache, ids, (prev, next)))
-                .then_some((prev, next))
+            (now > prev && now < next).then_some((prev, next))
         }
         _ => None,
     }
 }
 
-fn gap_is_covered(
+/// Every subscribed series the DB can answer was read over the gap and found
+/// empty there. One unread series is enough to say no.
+fn gap_was_read(
     cache: &TelemetryCache,
     ids: &std::collections::HashSet<ComponentId>,
+    schema: &ComponentSchemaRegistry,
     (start, end): (i64, i64),
 ) -> bool {
     ids.iter()
+        .filter(|id| schema.0.contains_key(*id))
         .all(|id| cache.is_covered(id, &(Timestamp(start)..Timestamp(end))))
 }
 
@@ -432,8 +444,6 @@ impl PlaybackDiscontinuities {
         } else {
             Vec::new()
         };
-        // Coverage can arrive or be evicted without changing the cached sample count.
-        self.gaps.retain(|gap| gap_is_covered(cache, ids, *gap));
     }
 }
 
@@ -602,127 +612,6 @@ mod tests {
     }
 
     #[test]
-    fn unread_spans_are_not_gaps_and_coverage_updates_without_new_samples() {
-        let id = ComponentId(1);
-        let other = ComponentId(2);
-        let mut cache = TelemetryCache::default();
-        let sample = || impeller_bevy::ComponentValue::F64(nox::array![0.0f64].to_dyn());
-        cache.insert(id, Timestamp(0), sample());
-        cache.insert(id, Timestamp(500_000_000), sample());
-        let mut ids = std::collections::HashSet::from([id]);
-        let mut index = PlaybackDiscontinuities::default();
-        assert_eq!(imminent_gap(&cache, &ids, 1_000_000), None);
-        index.scan(&cache, &ids);
-        assert!(index.gaps.is_empty());
-
-        cache.mark_covered(id, Timestamp(0), Timestamp(500_000_000));
-        assert_eq!(
-            imminent_gap(&cache, &ids, 1_000_000),
-            Some((0, 500_000_000))
-        );
-        index.scan(&cache, &ids);
-        assert_eq!(index.gaps, vec![(0, 500_000_000)]);
-
-        // An unread subscription can hide data even if it has no cached samples yet.
-        ids.insert(other);
-        assert_eq!(imminent_gap(&cache, &ids, 1_000_000), None);
-        index.scan(&cache, &ids);
-        assert!(index.gaps.is_empty());
-        cache.mark_covered(other, Timestamp(0), Timestamp(500_000_000));
-        assert_eq!(
-            imminent_gap(&cache, &ids, 1_000_000),
-            Some((0, 500_000_000))
-        );
-        index.scan(&cache, &ids);
-        assert_eq!(index.gaps, vec![(0, 500_000_000)]);
-
-        cache.remove_series(&other);
-        index.scan(&cache, &ids);
-        assert!(
-            index.gaps.is_empty(),
-            "lost coverage must invalidate drawn gaps too"
-        );
-    }
-
-    #[test]
-    fn two_loaded_islands_do_not_prove_the_space_between_them_is_empty() {
-        let id = ComponentId(1);
-        let mut cache = TelemetryCache::default();
-        for time in [0, 1_000_000, 499_000_000, 500_000_000] {
-            cache.insert(
-                id,
-                Timestamp(time),
-                impeller_bevy::ComponentValue::F64(nox::array![0.0f64].to_dyn()),
-            );
-        }
-        cache.mark_covered(id, Timestamp(0), Timestamp(2_000_000));
-        cache.mark_covered(id, Timestamp(499_000_000), Timestamp(501_000_000));
-        let ids = std::collections::HashSet::from([id]);
-        assert_eq!(imminent_gap(&cache, &ids, 240_000_000), None);
-        let mut index = PlaybackDiscontinuities::default();
-        index.scan(&cache, &ids);
-        assert!(index.gaps.is_empty());
-        cache.mark_covered(id, Timestamp(2_000_000), Timestamp(499_000_000));
-        assert_eq!(
-            imminent_gap(&cache, &ids, 240_000_000),
-            Some((1_000_000, 499_000_000))
-        );
-    }
-
-    #[test]
-    fn a_latest_table_value_cannot_move_playback_across_unread_data() {
-        let id = ComponentId(1);
-        let mut cache = TelemetryCache::default();
-        let sample = || impeller_bevy::ComponentValue::F64(nox::array![0.0f64].to_dyn());
-        cache.insert(id, Timestamp(0), sample());
-        cache.insert_live(id, Timestamp(500_000_000), sample());
-        let mut app = App::new();
-        app.insert_resource(cache)
-            .insert_resource(SeriesFetchPriority {
-                high: std::collections::HashSet::from([id]),
-            })
-            .init_resource::<crate::ui::Paused>()
-            .init_resource::<LatestFollow>()
-            .init_resource::<PlaybackLoop>()
-            .init_resource::<PlaybackRegion>()
-            .insert_resource(EarliestTimestamp(Timestamp(0)))
-            .insert_resource(LastUpdated(Timestamp(500_000_000)))
-            .insert_resource(CurrentTimestamp(Timestamp(1_000_000)))
-            .init_resource::<PlaybackDiscontinuities>()
-            .add_systems(Update, skip_discontinuities);
-        app.update();
-        assert_eq!(
-            app.world().resource::<CurrentTimestamp>().0,
-            Timestamp(1_000_000)
-        );
-        assert!(
-            app.world()
-                .resource::<PlaybackDiscontinuities>()
-                .gaps
-                .is_empty()
-        );
-
-        app.world_mut()
-            .resource_mut::<TelemetryCache>()
-            .mark_covered(id, Timestamp(0), Timestamp(500_000_000));
-        app.update();
-        assert_eq!(
-            app.world().resource::<CurrentTimestamp>().0,
-            Timestamp(500_000_000)
-        );
-        for (paused, follow) in [(true, false), (false, true)] {
-            app.world_mut().resource_mut::<CurrentTimestamp>().0 = Timestamp(1_000_000);
-            app.world_mut().resource_mut::<crate::ui::Paused>().0 = paused;
-            app.world_mut().resource_mut::<LatestFollow>().0 = follow;
-            app.update();
-            assert_eq!(
-                app.world().resource::<CurrentTimestamp>().0,
-                Timestamp(1_000_000)
-            );
-        }
-    }
-
-    #[test]
     fn the_playhead_gap_is_the_union_of_subscribed_series() {
         use impeller_bevy::ComponentValue;
 
@@ -733,8 +622,6 @@ mod tests {
         cache.insert(imu, Timestamp(0), sample());
         cache.insert(imu, Timestamp(5_000_000), sample());
         cache.insert(gps, Timestamp(1_000_000), sample());
-        cache.mark_covered(imu, Timestamp(0), Timestamp(5_000_001));
-        cache.mark_covered(gps, Timestamp(0), Timestamp(5_000_001));
 
         let mut ids = std::collections::HashSet::new();
         ids.insert(imu);
@@ -753,6 +640,48 @@ mod tests {
             imminent_gap(&cache, &ids, 2_000_000),
             Some((1_000_000, 5_000_000)),
             "once that sample is behind the playhead, the remaining hole is the gap"
+        );
+    }
+
+    #[test]
+    fn a_browser_gap_needs_every_readable_series_read_across_it() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+        use impeller_bevy::ComponentValue;
+
+        let sample = || ComponentValue::F64(nox::array![0.0f64].to_dyn());
+        let imu = ComponentId::new("imu");
+        let mass = ComponentId::new("mass");
+        let adapter = ComponentId::new("world_pos");
+        let mut cache = TelemetryCache::default();
+        cache.insert(imu, Timestamp(0), sample());
+        cache.insert(imu, Timestamp(500_000_000), sample());
+        let ids = std::collections::HashSet::from([imu, mass, adapter]);
+        let mut schema = ComponentSchemaRegistry::default();
+        for id in [imu, mass] {
+            let scalar = Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema");
+            schema.0.insert(id, scalar);
+        }
+
+        let gap = imminent_gap(&cache, &ids, 1_000_000).expect("samples 500 s apart");
+        assert!(
+            !gap_was_read(&cache, &ids, &schema, gap),
+            "an unread span is not a gap"
+        );
+        cache.mark_covered(imu, Timestamp(0), Timestamp(500_000_000));
+        assert!(
+            !gap_was_read(&cache, &ids, &schema, gap),
+            "a readable series with no samples cached must still be read"
+        );
+        cache.mark_covered(mass, Timestamp(0), Timestamp(500_000_000));
+        assert!(
+            gap_was_read(&cache, &ids, &schema, gap),
+            "an id the DB cannot answer, such as an adapter, does not veto the gap"
+        );
+        cache.remove_series(&mass);
+        assert!(
+            !gap_was_read(&cache, &ids, &schema, gap),
+            "lost coverage hides the gap again"
         );
     }
 
@@ -798,7 +727,6 @@ mod tests {
         let id = ComponentId::new("imu");
         cache.insert(id, Timestamp(0), sample());
         cache.insert(id, Timestamp(1_000_000), sample());
-        cache.mark_covered(id, Timestamp(0), Timestamp(1_000_001));
 
         let mut ids = std::collections::HashSet::new();
         ids.insert(id);
@@ -808,7 +736,6 @@ mod tests {
 
         // A late append opens a >2 s hole after the scan already caught up.
         cache.insert(id, Timestamp(5_000_000), sample());
-        cache.mark_covered(id, Timestamp(1_000_001), Timestamp(5_000_001));
         index.scan(&cache, &ids);
         assert_eq!(
             index.gaps,
@@ -818,7 +745,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stale_scan_for_a_verified_empty_id_does_not_hide_gaps() {
+    fn a_stale_scan_for_an_unfilled_id_does_not_hide_gaps() {
         use impeller_bevy::ComponentValue;
         let sample = || ComponentValue::F64(nox::array![0.0f64].to_dyn());
         let a = ComponentId::new("a");
@@ -836,8 +763,6 @@ mod tests {
         let mut cache = TelemetryCache::default();
         cache.insert(b, Timestamp(0), sample());
         cache.insert(b, Timestamp(5_000_000), sample());
-        cache.mark_covered(a, Timestamp(0), Timestamp(5_000_001));
-        cache.mark_covered(b, Timestamp(0), Timestamp(5_000_001));
         index.scan(&cache, &ids);
         assert_eq!(index.gaps, vec![(0, 5_000_000)]);
     }
@@ -850,7 +775,6 @@ mod tests {
         let id = ComponentId::new("imu");
         cache.insert(id, Timestamp(0), sample());
         cache.insert(id, Timestamp(5_000_000), sample());
-        cache.mark_covered(id, Timestamp(0), Timestamp(5_000_001));
 
         let mut ids = std::collections::HashSet::new();
         ids.insert(id);
@@ -877,7 +801,6 @@ mod tests {
         let id = ComponentId::new("imu");
         cache.insert(id, Timestamp(0), sample());
         cache.insert(id, Timestamp(3_000_000), sample());
-        cache.mark_covered(id, Timestamp(0), Timestamp(3_000_001));
 
         let mut ids = std::collections::HashSet::new();
         ids.insert(id);

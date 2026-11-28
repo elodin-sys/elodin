@@ -23,6 +23,8 @@ This document contains the help content for the Elodin command-line programs.
 * [`elodin upload`↴](#elodin-upload)
 * [`elodin editor`↴](#elodin-editor)
 * [`elodin run`↴](#elodin-run)
+* [`elodin monte-carlo`↴](#elodin-monte-carlo)
+* [`elodin determinism`↴](#elodin-determinism)
 * [`elodin-db`↴](#elodin-db)
 * [`elodin-db run`↴](#elodin-db-run)
 * [`elodin-db lua`↴](#elodin-db-lua)
@@ -50,6 +52,7 @@ This document contains the help content for the Elodin command-line programs.
 * `editor` — Launch the Elodin editor (default)
 * `run` — Run an Elodin simulation in headless mode
 * `monte-carlo` — Run Monte Carlo campaigns
+* `determinism` — Compare deterministic witnesses and replay pre_commit hooks from them
 * `login` — Log in to Elodin Cloud through your browser
 * `upload` — Upload a stopped TelemetryDB directory, compacting transmitted logs
 
@@ -362,6 +365,83 @@ Setup-only failures (a run whose port preflight failed, so no process ever
 spawned) skip the `post_run` hook entirely — there is no run database to score.
 Real-time-paced runs also record `behind_deadline_frac`, `real_time_factor`,
 and `drift_resets`, with worst-run callouts in the campaign summary.
+
+## `elodin determinism`
+
+Compare [deterministic witnesses](/reference/python-api#deterministic-witnesses)
+and replay `pre_commit` hooks from them (not available on Windows). Both
+subcommands exit 0 when everything matches, 1 at a mismatch, and 2 on an error,
+such as an unreadable file or witnesses with different schemas.
+
+A witness can come from any program that writes the
+[file format](/reference/python-api#witness-files), so these commands also
+check a program outside Elodin against an Elodin run; see
+[Custom C++ Runtimes](/reference/cpp-runtime#prove-it-matches).
+
+**Usage:** `elodin determinism <COMMAND>`
+
+### `elodin determinism inspect`
+
+**Usage:** `elodin determinism inspect [--json] [--schema <PATH>] <TRACE>`
+
+Validates the witness, including its schema digest, tick digests and root, then prints its tick
+and raw-byte inventory. `--json` prints the complete header, labels, schema, trailer and counts.
+`--schema` writes the validated schema alone, so another program can reproduce the record
+layout without a private reader.
+
+### `elodin determinism compare`
+
+**Usage:** `elodin determinism compare [--stop-at-first] <LEFT> <RIGHT>`
+
+Compares two witness files tick by tick and prints the first mismatch: the
+tick, stage, hook, record, and when both files kept that tick's exact bytes,
+the entity, row, byte and both values. Without `--stop-at-first`, it reads both
+files to the end and also prints how many ticks differ.
+
+```bash
+elodin determinism compare baseline/run.witness candidate/run.witness
+```
+
+```text
+identical: 600 ticks, root 72885022e2689c9a53c9fcadae417195f632599bdac6229bfa7c52b609fdb78a
+```
+
+```bash
+elodin determinism compare baseline/run.witness faulted/run.witness --stop-at-first
+```
+
+```text
+first mismatch
+  tick: 4096
+  stage: after_hook:0
+  hook: many_agent_step
+  channel: controller.response
+  entity: agent_007
+  row: 7
+  byte: 3
+  left: 0x84
+  right: 0x85
+```
+
+### `elodin determinism replay-hook`
+
+**Usage:** `elodin determinism replay-hook --library <LIB> --symbol <SYMBOL> [--live] <TRACE>`
+
+Loads the native hook `SYMBOL` from the shared library `LIB`, runs it on every
+tick `TRACE` kept exactly, with the rows and external channels it saw in the
+run, and compares what it writes with the recording. It needs neither the
+simulation nor the processes the hook talks to. `--live` leaves the external
+channels to the hook, so it does its own I/O. It finds the hook by the name,
+batch and partitions in the witness's labels.
+
+```bash
+elodin determinism replay-hook --library hook/build/release/libmany_agent_hook.so \
+  --symbol many_agent_step run.witness
+```
+
+```text
+reproduced: 600 ticks, 2400 records, 2707200 bytes; 0 ticks had digests only
+```
 
 ## Python Simulation Subcommands
 

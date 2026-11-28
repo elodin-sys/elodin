@@ -299,6 +299,10 @@ jobs:
           fi
           echo "--- appended to .cargo/config.toml ---"
           tail -8 .cargo/config.toml
+      # Musl matrix entries build elodin-db only. The editor targets need the SDK.
+      - name: Cesium Native SDK
+        if: ${{ !contains(matrix.targets[0], 'musl') }}
+        uses: ./.github/actions/cesium-native
       - name: Build artifacts
         run: |
           # Actually do builds and make zips and whatnot
@@ -423,7 +427,7 @@ jobs:
 
   cargo-deb:
     runs-on: ci-linux-x64
-    timeout-minutes: 90
+    timeout-minutes: 120
     needs:
       - plan
     if: ${{ github.event_name != 'pull_request' && (needs.plan.outputs.publishing == 'true' || needs.plan.outputs.dry-run == 'true' || fromJson(needs.plan.outputs.val).ci.github.pr_run_mode == 'upload') }}
@@ -458,6 +462,8 @@ jobs:
       - name: Install cargo-deb
         if: runner.environment == 'github-hosted'
         run: cargo install cargo-deb
+      - name: Cesium Native SDK
+        uses: ./.github/actions/cesium-native
       - name: cargo build
         run: cargo build --release --package elodin
       - name: cargo-deb

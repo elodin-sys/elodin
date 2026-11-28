@@ -28,6 +28,7 @@ pub struct JaxExec {
     inputs: Vec<InputSlot>,
     output_ids: Vec<ComponentId>,
     mutable_overlap: Vec<(usize, usize)>,
+    io_bytes: (u64, u64),
 }
 
 impl JaxExec {
@@ -101,6 +102,15 @@ impl JaxExec {
         let donate_argnums: Vec<usize> = Vec::new();
         let target_backend = if gpu { Some("gpu") } else { Some("cpu") };
         let jax_fn = compiled_system.compile_jax_module(py, &donate_argnums, target_backend)?;
+        let column_bytes = |id: &ComponentId| {
+            world
+                .column_by_id(*id)
+                .map_or(0, |col| col.column.len() as u64)
+        };
+        let io_bytes = (
+            inputs.iter().map(|i| column_bytes(&i.component_id)).sum(),
+            output_ids.iter().map(column_bytes).sum(),
+        );
 
         Ok(Self {
             metadata,
@@ -112,7 +122,22 @@ impl JaxExec {
             inputs,
             output_ids,
             mutable_overlap,
+            io_bytes,
         })
+    }
+
+    pub fn backend_report(&self) -> crate::tick_metrics::BackendReport {
+        crate::tick_metrics::BackendReport {
+            name: if self.cpu_backend {
+                "jax-cpu"
+            } else {
+                "jax-gpu"
+            },
+            workers: 1,
+            input_bytes_per_invocation: self.io_bytes.0,
+            output_bytes_per_invocation: self.io_bytes.1,
+            ..Default::default()
+        }
     }
 
     pub fn invoke_batch(

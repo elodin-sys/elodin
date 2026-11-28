@@ -1,37 +1,17 @@
-"""Regenerate patches after editing the ignored terrain dependency copy."""
+"""Regenerate the diagnostics-only patch from an edited dependency checkout."""
 
 import difflib
 from pathlib import Path
 import sys
 
-
-base = Path(sys.argv[1])
-edited = Path(".local/terrain-progressive/bevy-cesium")
-output = Path("experiments/terrain-progressive")
-groups = {
-    "tiles-core": [
-        "crates/tiles-core/src/lib.rs",
-        "crates/tiles-core/src/tests.rs",
-        "crates/tiles-core/src/transport/web.rs",
-    ],
-    "bevy-cesium": [
-        "src/render/contract.rs",
-        "src/browser.rs",
-        "src/backend.rs",
-        "src/render/mod.rs",
-        "src/render/readiness.rs",
-    ],
-}
-for package, files in groups.items():
-    chunks = []
-    for name in files:
-        relative = name.removeprefix("crates/tiles-core/") if package == "tiles-core" else name
-        chunks.extend(
-            difflib.unified_diff(
-                (base / name).read_text().splitlines(keepends=True),
-                (edited / name).read_text().splitlines(keepends=True),
-                fromfile=f"a/{relative}",
-                tofile=f"b/{relative}",
-            )
-        )
-    (output / f"{package}.patch").write_text("".join(chunks).replace("\n \n", "\n\n"))
+base, edited = map(Path, sys.argv[1:3])
+name = Path("crates/tiles-core/src/lib.rs")
+patch = difflib.unified_diff(
+    (base / name).read_text().splitlines(keepends=True),
+    (edited / name).read_text().splitlines(keepends=True),
+    fromfile="a/src/lib.rs",
+    tofile="b/src/lib.rs",
+)
+Path("experiments/terrain-progressive/tiles-core.patch").write_text(
+    "".join(patch).replace("\n \n", "\n\n")
+)

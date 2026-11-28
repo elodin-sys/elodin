@@ -1155,7 +1155,7 @@ mod tests {
         log.push(Timestamp(11), b"second").unwrap();
         assert_eq!(rx.recv().await.unwrap().unwrap().payload, b"second");
         // A rollover truncation rewinds the log; the next append re-primes.
-        log.truncate();
+        log.truncate().unwrap();
         log.push(Timestamp(12), b"fresh").unwrap();
         assert_eq!(rx.recv().await.unwrap().unwrap().payload, b"fresh");
         task.abort();

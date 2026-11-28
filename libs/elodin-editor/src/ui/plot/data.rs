@@ -3832,7 +3832,8 @@ mod tests {
         let id = ComponentId::new("test.constant");
         insert_f64(&mut cache, id, 0, 4.0);
         let range = Timestamp(10)..Timestamp(20);
-        cache.mark_covered(id, range.start, range.end);
+        // A later window alone leaves a gap, so the sample is not a confirmed hold.
+        cache.mark_covered(id, Timestamp(0), range.end);
         assert_eq!(
             hold_anchor_decision(id, range.start, &cache, &VisiblePrefetchState::default()),
             HoldAnchorDecision::Satisfied

@@ -62,6 +62,7 @@ members = [
     "libs/bevy_world_mesh",
     "libs/bevy_ai_skybox",
     "libs/cranelift-mlir",
+    "libs/elodin-model",
     "libs/monte-carlo",
     "libs/rtsp-ingest",
  ]
@@ -106,8 +107,8 @@ inherits = "release"
 lto = "thin"
 
 [workspace.dependencies]
-# v0.5.1
-bevy-cesium = { git = "https://github.com/elodin-sys/bevy-cesium", rev = "f249789487e75be8372ddf465c41fc2d98275508" }
+# v0.5.7
+bevy-cesium = { git = "https://github.com/elodin-sys/bevy-cesium", rev = "18cbe4b26235d5127fdaab08334ef127a2595b11" }
 db-macros.path = "libs/db/macros"
 roci.path = "fsw/roci"
 roci.default-features = false

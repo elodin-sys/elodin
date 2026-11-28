@@ -50,6 +50,7 @@ use vtable_stream::handle_vtable_stream;
 use zerocopy::IntoBytes;
 
 pub use error::Error;
+pub use watch::WatchCursor;
 
 pub(crate) const COMPONENT_CREATION_INDEX_METADATA_KEY: &str = "_creation_index";
 pub const TX_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -77,6 +78,7 @@ pub mod export_mcap;
 pub mod export_videos;
 pub mod fix_timestamps;
 pub mod follow;
+mod follow_identity;
 mod follow_stream;
 #[cfg(feature = "grpc")]
 pub mod grpc;
@@ -91,6 +93,7 @@ pub mod trim;
 pub mod truncate;
 pub mod utils;
 mod vtable_stream;
+mod watch;
 
 /// Analyzes a VTable to find byte ranges that are used as timestamp sources.
 /// Returns a vector of (offset, end) tuples representing the byte ranges.
@@ -627,12 +630,11 @@ impl DB {
     ///
     /// This effectively resets the database to an empty state, ready for fresh data.
     /// The vtable generation is incremented to signal that clients should refresh their views.
-    pub fn truncate(&self) {
-        self.with_state(|state| {
-            state.truncate_all();
-        });
+    pub fn truncate(&self) -> Result<(), Error> {
+        self.with_state_mut(|state| state.truncate_all())?;
         self.last_updated.store(Timestamp(i64::MIN));
         self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
+        Ok(())
     }
 
     /// Set the earliest timestamp for this database.
@@ -675,6 +677,7 @@ impl DB {
                 || path.file_name() == Some(OsStr::new("msgs"))
                 || path.file_name() == Some(OsStr::new("assets"))
                 || path.file_name() == Some(OsStr::new("simulation_source"))
+                || path.file_name() == Some(OsStr::new("follow_messages"))
             {
                 trace!("Skipping non-component directory: {}", path.display());
                 continue;
@@ -1190,12 +1193,13 @@ impl DB {
 
     /// Truncate a specific message log (clears all messages, preserves metadata).
     /// Used when the log hits MapOverflow so sensor camera frames can continue.
-    pub fn truncate_msg_log(&self, id: PacketId) {
+    pub fn truncate_msg_log(&self, id: PacketId) -> Result<(), Error> {
         self.with_state_mut(|s| {
             if let Some(log) = s.msg_logs.get(&id) {
-                log.truncate();
+                log.truncate()?;
             }
-        });
+            Ok(())
+        })
     }
 
     pub fn get_or_insert_fixed_rate_state(
@@ -1480,13 +1484,22 @@ impl State {
     }
 
     /// Truncate all components and message logs, clearing all data while preserving schemas and metadata.
-    pub fn truncate_all(&self) {
+    pub fn truncate_all(&self) -> Result<(), Error> {
+        // Persist every new log identity before clearing any component or log.
+        // A preparation failure may invalidate follow cursors, but must leave
+        // all samples intact and let the caller retain its simulation clock.
+        let prepared = self
+            .msg_logs
+            .values()
+            .map(|log| log.prepare_truncate())
+            .collect::<Result<Vec<_>, _>>()?;
         for component in self.components.values() {
             component.truncate();
         }
-        for msg_log in self.msg_logs.values() {
-            msg_log.truncate();
+        for log in prepared {
+            log.commit();
         }
+        Ok(())
     }
 }
 
@@ -1940,6 +1953,7 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
             }
             Ok(PacketAction::StartFollowStream {
                 target_packet_size,
+                indexed,
                 req_id: follow_req_id,
             }) => {
                 // The connection is now dedicated to the follow stream.
@@ -1953,6 +1967,7 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
                     sink.writer(),
                     target_packet_size,
                     follow_req_id,
+                    indexed,
                 )
                 .await?;
                 return Ok(());
@@ -1992,6 +2007,7 @@ enum PacketAction {
     /// Transition the connection into follow-stream mode.
     StartFollowStream {
         target_packet_size: u32,
+        indexed: bool,
         req_id: u8,
     },
 }
@@ -2821,8 +2837,14 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
         }
         Packet::Msg(m) if m.id == FollowStream::ID => {
             let follow = m.parse::<FollowStream>()?;
+            let indexed = match m.parse::<FollowStreamV2>() {
+                Ok(extension) if extension.version == 2 => true,
+                Ok(_) => return Err(Error::FollowProtocolUnsupported),
+                Err(_) => false,
+            };
             return Ok(PacketAction::StartFollowStream {
                 target_packet_size: follow.target_packet_size,
+                indexed,
                 req_id: m.req_id,
             });
         }
@@ -3709,6 +3731,73 @@ impl AtomicTimestampExt for AtomicCell<Timestamp> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failed_truncate_preserves_all_components_logs_and_clock() {
+        let directory = tempfile::tempdir().unwrap();
+        let db = DB::create(directory.path().join("db")).unwrap();
+        let component_id = ComponentId::new("truncate.component");
+        db.with_state_mut(|state| {
+            state
+                .insert_component_with_start_timestamp(
+                    component_id,
+                    ComponentSchema::new(PrimType::F64, &[]),
+                    Timestamp(0),
+                    &db.path,
+                )
+                .unwrap();
+            state.components[&component_id]
+                .time_series
+                .push_buf(Timestamp(10), &42.0_f64.to_le_bytes())
+                .unwrap();
+        });
+        for id in [[71, 1], [71, 2], [71, 3]] {
+            db.push_msg(Timestamp(100), id, b"keep").unwrap();
+        }
+        // Fail on the last log, after earlier identities have been prepared.
+        let last_id = db.with_state(|state| *state.msg_logs.keys().last().unwrap());
+        let pending = db
+            .path
+            .join("msgs")
+            .join(u16::from_le_bytes(last_id).to_string())
+            .join("follow_generation.pending");
+        std::fs::create_dir(&pending).unwrap();
+        let generation = db.vtable_gen.latest();
+        let last_updated = db.last_updated.latest();
+        assert!(db.truncate().is_err());
+        assert_eq!(db.vtable_gen.latest(), generation);
+        assert_eq!(db.last_updated.latest(), last_updated);
+        db.with_state(|state| {
+            let (timestamp, value) = state.components[&component_id]
+                .time_series
+                .latest()
+                .unwrap();
+            assert_eq!(*timestamp, Timestamp(10));
+            assert_eq!(value, &42.0_f64.to_le_bytes());
+            for log in state.msg_logs.values() {
+                assert_eq!(log.get_index(0).unwrap().1.as_ref(), b"keep");
+            }
+        });
+
+        std::fs::remove_dir(pending).unwrap();
+        db.truncate().unwrap();
+        assert_eq!(db.last_updated.latest(), Timestamp(i64::MIN));
+        assert_eq!(db.vtable_gen.latest(), generation + 1);
+        db.with_state(|state| {
+            assert!(
+                state.components[&component_id]
+                    .time_series
+                    .latest()
+                    .is_none()
+            );
+            assert!(
+                state
+                    .msg_logs
+                    .values()
+                    .all(|log| log.timestamps().is_empty())
+            );
+        });
+    }
 
     fn stream_layout_component(
         path: &Path,

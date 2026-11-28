@@ -6,7 +6,7 @@ Cranelift, replacing IREE as the CPU execution backend for Elodin simulations.
 ## Table of Contents
 
 1. [Motivation](#motivation)
-2. [End-to-End Compilation Pipeline](#end-to-end-compilation-pipeline)
+2. [End-to-End Compilation Pipeline](#end-to-end-compilation-pipeline), including [parallel call groups](#parallel-call-groups-parallel-rs-pool-rs)
 3. [Dual ABI Architecture](#dual-abi-architecture)
 4. [SIMD: Packed-f64 Lane Representation](#simd-packed-f64-lane-representation)
 5. [JIT Memory Layout](#jit-memory-layout)
@@ -280,6 +280,27 @@ function call into optimized native code operating directly on the simulation's 
 The tick is one phase of the simulation loop; `nox-py` also exchanges components with the
 database before and after it (`DbSync` in `libs/nox-py/src/impeller_server.rs`), and for a
 model with hundreds of components those phases can cost as much as the tick.
+
+### Parallel call groups (`parallel.rs`, `pool.rs`)
+
+With `CompileConfig::workers` above 1 (`World.run(workers=...)`), a pass after the inliner
+groups the top-level calls of each pointer-ABI function that do not depend on each other:
+it levels the calls by their data dependencies, hoists independent instructions out of the
+way, and keeps runs of two or more same-level calls. Lowering turns each group into a task
+table of trampolines, `fn(task)`, and one call to `pool::run`. `Query.map` produces such calls
+when it traces fixed chunks of two entities, and `map_seq` produces one call per entity.
+
+The pool's workers and the calling thread claim tasks from every open group. A task may open
+a group of its own, and whoever opens a group can finish it alone, so nesting cannot
+deadlock. A group whose measured work averages under 20 µs runs on the calling thread, since
+waking workers costs more; idle workers spin for 100 µs, then sleep until the simulation loop
+wakes them before its next tick. Profiling keeps calls serial, because its probes keep
+per-thread state.
+
+Grouping only reorders independent calls, so results do not depend on how many workers run
+them. Chunking can: chunks are fixed and even, so every lane keeps the SIMD pair or scalar
+tail it has in a whole-column call, but a reduction inside a chunk can round differently from
+one over the whole column. `workers=1` therefore keeps the single-call lowering.
 
 ---
 
@@ -676,9 +697,11 @@ Each LAPACK handler follows the same pattern:
 4. **Emit** a call to the registered host function symbol
 5. **Load** output values from the stack slot back into SSA values
 
-Cholesky, LU (`dgetrf`) and triangular solve (`dtrsm`) also take a stack of
-matrices, as `jax.vmap` emits them (`num_batch_dims = "1"`): steps 3–5 repeat
-for each matrix through the same slot.
+SVD (`dgesdd`), LU (`dgetrf`), triangular solve (`dtrsm`), Cholesky, QR
+(`dgeqrf`, `dorgqr`) and `dsyevd` also take a stack of matrices, as `jax.vmap`
+emits them (`num_batch_dims = "1"`): steps 3–5 repeat for each matrix through
+the same slot. In a pointer-ABI function the call lowers through this code one
+matrix at a time (`lower_mem_custom_call`).
 
 The host functions (`extern "C"`) handle:
 - Row-major (IR convention) to column-major (faer convention) conversion
@@ -980,7 +1003,7 @@ lane ([Pointer-ABI element types](#pointer-abi-element-types)).
 | stablehlo.add | yes | yes | yes (f64/i64/i32) | |
 | stablehlo.subtract | yes | yes | yes (f64/i64/i32) | |
 | stablehlo.multiply | yes | yes | yes (f64/i64/i32) | |
-| stablehlo.divide | yes | yes | yes (f64/i64/i32/ui32) | zero-protection on integer paths |
+| stablehlo.divide | yes | yes | yes (f64/i64/i32/ui32) | integers as in XLA: `x / 0` is all ones, signed `MIN / -1` is `MIN` |
 | stablehlo.negate | yes | yes | yes (f64/i64/i32) | |
 | stablehlo.sqrt | yes | yes | yes | inline Cranelift instruction |
 | stablehlo.rsqrt | yes | yes | yes | 1/sqrt(x) |
@@ -991,7 +1014,7 @@ lane ([Pointer-ABI element types](#pointer-abi-element-types)).
 | stablehlo.floor | yes | yes | yes | |
 | stablehlo.ceil | yes | yes | yes | |
 | stablehlo.sign | yes | yes | yes | |
-| stablehlo.remainder | yes | yes | yes (f64) | |
+| stablehlo.remainder | yes | yes | yes (f64) | integers as in XLA: `x % 0` is `x`, signed `MIN % -1` is 0 |
 | stablehlo.clamp | yes | yes | yes | ternary: min/operand/max |
 | stablehlo.round_nearest_even | yes | yes | yes | banker's rounding |
 | stablehlo.sine | yes | yes | yes | via libm |
@@ -1346,10 +1369,10 @@ much measured time or code each one addresses.
   squaring the SIMD benefit on large-enough tensors.
 
   The runtime kernels are a smaller first step. Elementwise f64 ops above 128
-  lanes now run in `tensor_rt`, whose add, sub, mul and div are fixed
-  `wide::f64x2` loops; an AVX2 body chosen once at startup would speed up
-  exactly the large tensors without touching codegen, and those four ops give
-  the same bits at any lane width.
+  lanes run in `tensor_rt`. Its `sin` and `cos` choose an AVX2 body at startup
+  that follows the `wide::f64x2` algorithm operation for operation, so the bits
+  match. Add, sub, mul and div stay on `wide::f64x2`: an AVX2 loop gave the same
+  bits but measured slower on cold caches.
 
 - **FFT runtime.** `tensor_rt`'s FFT/IFFT/RFFT/IRFFT are naive DFT (O(N²)).
   Swap to `rustfft` for O(N log N) with a one-file change. No current
@@ -1438,12 +1461,11 @@ every lowering.
   by `map`, `reduce_window`, and `select_and_scatter`) — is straightforward
   when a non-trivial comparator first appears.
 
-- **LAPACK `custom_call` from pointer-ABI functions.** LAPACK lowering is
-  wired on the scalar path only. In practice LAPACK buffers are always small
-  (6x6, 8x8) and stay below the pointer-ABI threshold, so this has never
-  triggered. If a future sim crosses the 64-element threshold with a LAPACK
-  call, follow the dual-path pattern already used by `dot_general` and
-  `gather`.
+- **LAPACK `custom_call` from pointer-ABI functions.** These lower lane by
+  lane through the scalar-ABI code, which loads and stores every element of the
+  stack of matrices. Calling the host functions on the operand buffers
+  directly, as `dot_general` and `gather` do, would remove those copies once a
+  simulation's LAPACK calls are large enough for them to matter.
 
 - **Convolution at scale.** `stablehlo.convolution` is implemented with full
   N-D dimension numbers, strides, padding, dilations, and feature/batch

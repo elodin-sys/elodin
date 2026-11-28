@@ -28,12 +28,13 @@ pub mod scene_environment;
 pub(crate) mod screenshot;
 pub(crate) mod simulation_startup;
 pub mod terrain_playback;
-mod terrain_priority;
 pub mod thruster_particles;
 pub mod view_cube;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod wasm_shadows;
 mod web_asset;
+#[cfg(target_family = "wasm")]
+pub(crate) mod web_screenshot;
 pub(crate) mod world_mesh;
 
 pub use logical_key::{LogicalKeyPlugin, LogicalKeyState};

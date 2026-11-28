@@ -835,6 +835,44 @@ impl Msg for FollowStream {
     const ID: PacketId = [224, 37];
 }
 
+/// Indexed follow protocol extension. The legacy prefix stays readable by old
+/// sources, but followers require an explicit acknowledgement before replication.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FollowStreamV2 {
+    pub target_packet_size: u32,
+    pub version: u8,
+}
+impl Msg for FollowStreamV2 {
+    const ID: PacketId = FollowStream::ID;
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FollowStreamReady {
+    pub message_logs: Vec<PacketId>,
+}
+impl Msg for FollowStreamReady {
+    const ID: PacketId = [224, 42];
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum FollowMessage {
+    Log {
+        id: PacketId,
+        generation: [u8; 16],
+        count: u64,
+    },
+    Entry {
+        id: PacketId,
+        generation: [u8; 16],
+        index: u64,
+        timestamp: Timestamp,
+        payload: Vec<u8>,
+    },
+}
+impl Msg for FollowMessage {
+    const ID: PacketId = [224, 43];
+}
+
 /// Like [`MsgStream`], but responses use `MsgWithTimestamp` packets that
 /// preserve the original source timestamps.  Used by the `FollowStream`
 /// handler for message replication.

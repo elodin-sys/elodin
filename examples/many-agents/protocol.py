@@ -1,0 +1,65 @@
+"""Fixed-size UDP packets exchanged with the controller processes."""
+
+from __future__ import annotations
+
+import numpy as np
+
+
+STATE_MAGIC = b"MALS"
+COMMAND_MAGIC = b"MALC"
+VERSION = 1
+STATE_DOUBLES = 126
+COMMAND_DOUBLES = 10
+HEADER_FIELDS = [("magic", "S4"), ("version", "<u2"), ("flags", "<u2"), ("tick", "<u8")]
+# One packet per row: the 16-byte header, then the doubles. A reply ends with the time the
+# controller took to answer, which describes the host, not the simulation.
+STATE_DTYPE = np.dtype(HEADER_FIELDS + [("values", "<f8", (STATE_DOUBLES,))])
+COMMAND_DTYPE = np.dtype(
+    HEADER_FIELDS + [("values", "<f8", (COMMAND_DOUBLES,)), ("service_ns", "<u8")]
+)
+STATE_SIZE = STATE_DTYPE.itemsize
+COMMAND_SIZE = COMMAND_DTYPE.itemsize
+# The reply's values: everything the controller decided.
+RESPONSE_SIZE = COMMAND_DOUBLES * 8
+
+
+def state_frames(count: int) -> np.ndarray:
+    frames = np.zeros(count, dtype=STATE_DTYPE)
+    frames["magic"] = STATE_MAGIC
+    frames["version"] = VERSION
+    return frames
+
+
+def encode_states(
+    frames: np.ndarray,
+    *,
+    tick: int,
+    agent_position,
+    agent_velocity,
+    object_position,
+    object_velocity,
+    diagnostics,
+) -> None:
+    """Fills the state packet of every agent, one per row of `frames`."""
+    frames["tick"] = tick
+    values = frames["values"]
+    values[:, 0:3] = agent_position
+    values[:, 3:6] = agent_velocity
+    values[:, 6:9] = object_position
+    values[:, 9:12] = object_velocity
+    end = 12 + diagnostics.shape[1]
+    values[:, 12:end] = diagnostics
+    values[:, end:] = 0.0
+
+
+def decode_responses(replies: np.ndarray, expected_tick: int) -> np.ndarray:
+    """Returns the values of every reply, after checking that each answers `expected_tick`. The
+    first three are the command."""
+    if (
+        np.any(replies["magic"] != COMMAND_MAGIC)
+        or np.any(replies["version"] != VERSION)
+        or np.any(replies["flags"] != 0)
+        or np.any(replies["tick"] != expected_tick)
+    ):
+        raise ValueError("invalid command packet header")
+    return replies["values"].copy()

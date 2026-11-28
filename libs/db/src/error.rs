@@ -13,6 +13,10 @@ fn fmt_misaligned_component(name: &Option<String>, id: &ComponentId) -> String {
 
 #[derive(Debug, Error)]
 pub enum Error {
+    #[error("follow message history diverged for {id:?}; use a fresh follower database")]
+    FollowHistoryChanged { id: PacketId },
+    #[error("source does not support indexed follow replication; upgrade the source database")]
+    FollowProtocolUnsupported,
     #[error("map overflow")]
     MapOverflow,
     #[error("stellarator {0}")]

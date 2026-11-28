@@ -710,6 +710,26 @@ module @module {
 }
 
 #[test]
+fn test_oversized_convert_is_a_compile_error() {
+    // 2^23 + 1 f64s are one element over the 64 MiB stack-slot limit.
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<8388609xf32>) -> tensor<1xf64> {
+    %0 = stablehlo.convert %arg0 : (tensor<8388609xf32>) -> tensor<8388609xf64>
+    %1 = stablehlo.slice %0 [0:1] : (tensor<8388609xf64>) -> tensor<1xf64>
+    return %1 : tensor<1xf64>
+  }
+}
+"#;
+    let module = cranelift_mlir::parser::parse_module(mlir).unwrap();
+    let err = cranelift_mlir::lower::compile_module(&module).err();
+    assert!(
+        err.as_deref().is_some_and(|err| err.contains("stack slot")),
+        "{err:?}"
+    );
+}
+
+#[test]
 fn test_iota() {
     let mlir = r#"
 module @module {
@@ -1427,7 +1447,7 @@ fn test_acos() {
     let mlir = r#"
 module @module {
   func.func public @main(%arg0: tensor<3xf64>) -> tensor<3xf64> {
-    %0 = chlo.acos %arg0 : tensor<f64> -> tensor<f64>
+    %0 = chlo.acos %arg0 : tensor<3xf64> -> tensor<3xf64>
     return %0 : tensor<3xf64>
   }
 }
@@ -4830,7 +4850,7 @@ fn i64_binop_mem_test(op: &str, a: &[i64], b: &[i64], expected: &[i64]) {
 
 #[test]
 fn test_div_i64_mem() {
-    i64_binop_mem_test("divide", &[10, -15, 7], &[3, 4, 0], &[3, -3, 0]);
+    i64_binop_mem_test("divide", &[10, -15, 7], &[3, 4, 0], &[3, -3, -1]);
 }
 
 #[test]
@@ -5336,6 +5356,45 @@ module @module {
     let out = run_mlir_mem(mlir, &[&in0, &in1], &[24]);
     let result = read_i64s(&out[0]);
     assert_eq!(result, &[1, 2, -2]);
+}
+
+#[test]
+fn test_integer_division_by_zero_and_overflow() {
+    // As XLA: x / 0 is all ones, x % 0 is x, MIN / -1 is MIN and MIN % -1 is 0.
+    let mlir = |ty: &str| {
+        format!(
+            r#"
+module @module {{
+  func.func public @main(%arg0: tensor<3x{ty}>, %arg1: tensor<3x{ty}>) -> (tensor<3x{ty}>, tensor<3x{ty}>) {{
+    %0 = stablehlo.divide %arg0, %arg1 : tensor<3x{ty}>
+    %1 = stablehlo.remainder %arg0, %arg1 : tensor<3x{ty}>
+    return %0, %1 : tensor<3x{ty}>, tensor<3x{ty}>
+  }}
+}}
+"#
+        )
+    };
+    for run in [run_mlir, run_mlir_mem] {
+        let (x, d) = (i64_buf(&[7, i64::MIN, -7]), i64_buf(&[0, -1, 2]));
+        let out = run(&mlir("i64"), &[&x, &d], &[24, 24]);
+        assert_eq!(read_i64s(&out[0]), [-1, i64::MIN, -3]);
+        assert_eq!(read_i64s(&out[1]), [7, 0, -1]);
+
+        let (x, d) = (i32_buf(&[7, i32::MIN, -7]), i32_buf(&[0, -1, 2]));
+        let out = run(&mlir("i32"), &[&x, &d], &[12, 12]);
+        assert_eq!(read_i32s(&out[0]), [-1, i32::MIN, -3]);
+        assert_eq!(read_i32s(&out[1]), [7, 0, -1]);
+
+        let (x, d) = (u32_buf(&[7, u32::MAX, 9]), u32_buf(&[0, 2, 4]));
+        let out = run(&mlir("ui32"), &[&x, &d], &[12, 12]);
+        assert_eq!(read_u32s(&out[0]), [u32::MAX, u32::MAX / 2, 2]);
+        assert_eq!(read_u32s(&out[1]), [7, 1, 1]);
+
+        let (x, d) = (u64_buf(&[7, u64::MAX, 9]), u64_buf(&[0, 2, 4]));
+        let out = run(&mlir("ui64"), &[&x, &d], &[24, 24]);
+        assert_eq!(read_u64s(&out[0]), [u64::MAX, u64::MAX / 2, 2]);
+        assert_eq!(read_u64s(&out[1]), [7, 1, 1]);
+    }
 }
 
 #[test]
@@ -6204,6 +6263,104 @@ module @module {
         &read_f64s(&out[0]),
         &[5.0, 1.0, -2.0, 2.0, 1.0, 2.0, 1.0, 3.0],
     );
+}
+
+#[test]
+fn test_lapack_batched_matches_each_matrix() {
+    // Each module with `{b}` as "2x" takes a stack of both matrices and must return, on both
+    // ABIs, what it returns with `{b}` empty for each matrix alone.
+    let mats = [
+        [4.0, 1.0, 0.5, 1.0, 3.0, 0.2, 0.5, 0.2, 2.0],
+        [2.0, -1.0, 0.0, -1.0, 2.0, -1.0, 0.0, -1.0, 2.0],
+    ];
+    let cases: [(&str, &[usize]); 6] = [
+        (
+            r#"module @module {
+  func.func public @main(%arg0: tensor<{b}3x3xf64>) -> (tensor<{b}3x3xf64>, tensor<{b}3xf64>, tensor<{b}3x3xf64>, tensor<{b}3x3xf64>, tensor<{b}i32>) {
+    %0:5 = stablehlo.custom_call @lapack_dgesdd_ffi(%arg0) {backend_config = "", mhlo.backend_config = {mode = 65 : ui8}} -> (tensor<{b}3x3xf64>, tensor<{b}3xf64>, tensor<{b}3x3xf64>, tensor<{b}3x3xf64>, tensor<{b}i32>)
+    return %0#0, %0#1, %0#2, %0#3, %0#4 : tensor<{b}3x3xf64>, tensor<{b}3xf64>, tensor<{b}3x3xf64>, tensor<{b}3x3xf64>, tensor<{b}i32>
+  }
+}"#,
+            &[72, 24, 72, 72, 4],
+        ),
+        (
+            r#"module @module {
+  func.func public @main(%arg0: tensor<{b}3x3xf64>) -> (tensor<{b}3x3xf64>, tensor<{b}3xf64>, tensor<{b}i32>) {
+    %0:3 = stablehlo.custom_call @lapack_dsyevd_ffi(%arg0) {backend_config = "", mhlo.backend_config = {mode = 86 : ui8, uplo = 76 : ui8}} -> (tensor<{b}3x3xf64>, tensor<{b}3xf64>, tensor<{b}i32>)
+    return %0#0, %0#1, %0#2 : tensor<{b}3x3xf64>, tensor<{b}3xf64>, tensor<{b}i32>
+  }
+}"#,
+            &[72, 24, 4],
+        ),
+        (
+            r#"module @module {
+  func.func public @main(%arg0: tensor<{b}3x3xf64>) -> tensor<{b}3x3xf64> {
+    %0:2 = stablehlo.custom_call @lapack_dgeqrf_ffi(%arg0) {backend_config = "", mhlo.backend_config = {}} -> (tensor<{b}3x3xf64>, tensor<{b}3xf64>)
+    %1 = stablehlo.custom_call @lapack_dorgqr_ffi(%0#0, %0#1) {backend_config = "", mhlo.backend_config = {}} -> tensor<{b}3x3xf64>
+    return %1 : tensor<{b}3x3xf64>
+  }
+}"#,
+            &[72],
+        ),
+        (
+            r#"module @module {
+  func.func public @main(%arg0: tensor<{b}3x3xf64>) -> (tensor<{b}3x3xf64>, tensor<{b}3xi32>, tensor<{b}i32>) {
+    %0:3 = stablehlo.custom_call @lapack_dgetrf_ffi(%arg0) {backend_config = "", mhlo.backend_config = {}} -> (tensor<{b}3x3xf64>, tensor<{b}3xi32>, tensor<{b}i32>)
+    return %0#0, %0#1, %0#2 : tensor<{b}3x3xf64>, tensor<{b}3xi32>, tensor<{b}i32>
+  }
+}"#,
+            &[72, 12, 4],
+        ),
+        (
+            r#"module @module {
+  func.func public @main(%arg0: tensor<{b}3x3xf64>) -> tensor<{b}3x3xf64> {
+    %0 = stablehlo.custom_call @lapack_dtrsm_ffi(%arg0, %arg0) {backend_config = "", mhlo.backend_config = {diag = 85 : ui8, side = 76 : ui8, trans_x = 78 : ui8, uplo = 76 : ui8}} -> tensor<{b}3x3xf64>
+    return %0 : tensor<{b}3x3xf64>
+  }
+}"#,
+            &[72],
+        ),
+        (
+            r#"module @module {
+  func.func public @main(%arg0: tensor<{b}3x3xf64>) -> (tensor<{b}3x3xf64>, tensor<{b}i32>) {
+    %0:2 = stablehlo.custom_call @lapack_dpotrf_ffi(%arg0) {backend_config = "", mhlo.backend_config = {uplo = 76 : ui8}} -> (tensor<{b}3x3xf64>, tensor<{b}i32>)
+    return %0#0, %0#1 : tensor<{b}3x3xf64>, tensor<{b}i32>
+  }
+}"#,
+            &[72, 4],
+        ),
+    ];
+    for (module, sizes) in cases {
+        let mut expected = vec![Vec::new(); sizes.len()];
+        for m in &mats {
+            let outs = run_mlir(&module.replace("{b}", ""), &[&f64_buf(m)], sizes);
+            for (e, out) in expected.iter_mut().zip(outs) {
+                e.extend(out);
+            }
+        }
+        let stacked = f64_buf(&mats.concat());
+        let sizes: Vec<usize> = sizes.iter().map(|s| s * mats.len()).collect();
+        for run in [run_mlir, run_mlir_mem] {
+            assert_eq!(
+                run(&module.replace("{b}", "2x"), &[&stacked], &sizes),
+                expected
+            );
+        }
+    }
+}
+
+#[test]
+#[should_panic(expected = "unsupported custom_call target: mystery")]
+fn test_operandless_custom_call_mem() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2xf64>) -> tensor<2xf64> {
+    %0 = stablehlo.custom_call @mystery() {backend_config = ""} -> tensor<2xf64>
+    return %0 : tensor<2xf64>
+  }
+}
+"#;
+    run_mlir_mem(mlir, &[&f64_buf(&[1.0, 2.0])], &[16]);
 }
 
 // ---- Triangular solve tests ----

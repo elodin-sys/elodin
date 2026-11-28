@@ -6,8 +6,41 @@ use crate::cranelift_exec::CraneliftExec;
 use crate::error::Error;
 use crate::exec::ExecMetadata;
 use crate::system::{CompiledSystem, noxpr_to_callable};
+use crate::tick_metrics::{CompileReport, Timing};
 use crate::utils::PrimTypeExt;
 use crate::world::World;
+
+/// StableHLO text compiled ahead of time into an object file for this host; see
+/// `cranelift_mlir::lower::compile_module_to_object`.
+#[pyfunction]
+#[pyo3(signature = (mlir, prefix, workers = 1, cpu = "native"))]
+pub fn _compile_stablehlo_object<'py>(
+    py: Python<'py>,
+    mlir: &str,
+    prefix: &str,
+    workers: usize,
+    cpu: &str,
+) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
+    let mut ir_module = cranelift_mlir::parser::parse_module(mlir)
+        .map_err(|e| Error::CraneliftBackend(format!("MLIR parse failed: {e}")))?;
+    cranelift_mlir::const_fold::fold_module(&mut ir_module);
+    let object = cranelift_mlir::lower::compile_module_to_object(&ir_module, prefix, workers, cpu)
+        .map_err(|e| Error::CraneliftBackend(format!("Cranelift compile failed: {e}")))?;
+    Ok(pyo3::types::PyBytes::new(py, &object))
+}
+
+#[pyfunction]
+#[pyo3(signature = (cpu = "native"))]
+pub fn _stablehlo_object_target(cpu: &str) -> PyResult<String> {
+    let (triple, features) = cranelift_mlir::lower::object_target(cpu)
+        .map_err(|e| Error::CraneliftBackend(format!("Cranelift target failed: {e}")))?;
+    Ok(serde_json::json!({
+        "triple": triple,
+        "cpu": cpu,
+        "features": features.into_iter().collect::<std::collections::BTreeMap<_, _>>(),
+    })
+    .to_string())
+}
 
 pub fn compile_cranelift_module(
     py: Python<'_>,
@@ -55,7 +88,13 @@ pub fn compile_cranelift_module(
     let fold_ms = fold_start.elapsed().as_secs_f64() * 1000.0;
 
     let compile_start = Instant::now();
-    let compiled = cranelift_mlir::lower::compile_module(&ir_module)
+    let mut config = cranelift_mlir::lower::CompileConfig {
+        workers: world.metadata.workers,
+        ..cranelift_mlir::lower::CompileConfig::from_env()
+    };
+    config.profile_enabled |= world.metadata.timing >= Timing::Systems;
+    config.profile_op_times |= world.metadata.timing >= Timing::Operations;
+    let compiled = cranelift_mlir::lower::compile_module_with_config(&ir_module, config)
         .map_err(|e| Error::CraneliftBackend(format!("Cranelift compile failed: {e}")))?;
     let compile_ms = compile_start.elapsed().as_secs_f64() * 1000.0;
 
@@ -104,5 +143,14 @@ pub fn compile_cranelift_module(
         arg_slots: compiled_system.input_slots.clone(),
     };
 
-    CraneliftExec::new(metadata, compiled, world)
+    let mut exec = CraneliftExec::new(metadata, compiled, world)?;
+    exec.compile_ms = CompileReport {
+        lower: lower_ms,
+        parse: parse_ms,
+        fold: fold_ms,
+        ir_build: timings.ir_build_ms,
+        codegen: timings.codegen_ms,
+        link: timings.link_ms,
+    };
+    Ok(exec)
 }

@@ -173,26 +173,6 @@ struct FileImageAssets {
     handles: HashMap<String, Handle<Image>>,
 }
 
-pub(super) fn startup_assets_pending(world: &World) -> bool {
-    let server = world.resource::<AssetServer>();
-    world
-        .get_resource::<FileEffectAssets>()
-        .is_some_and(|effects| {
-            effects
-                .handles
-                .values()
-                .any(|handle| super::terrain_priority::asset_loading(server, handle.id()))
-        })
-        || world
-            .get_resource::<FileImageAssets>()
-            .is_some_and(|images| {
-                images
-                    .handles
-                    .values()
-                    .any(|handle| super::terrain_priority::asset_loading(server, handle.id()))
-            })
-}
-
 impl FileImageAssets {
     fn get_or_load(
         &mut self,

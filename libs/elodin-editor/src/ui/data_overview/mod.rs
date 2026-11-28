@@ -360,12 +360,12 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                         query,
                         move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                               mut time_ranges: ResMut<ComponentTimeRanges>| {
+                            // Stay registered until the completion marker (batch: None) so the
+                            // request ID is not reused while that marker is still on its way.
+                            let done = !res.as_ref().is_ok_and(|ipc| ipc.batch.is_some());
                             if !time_ranges.accepts(generation) {
-                                return true;
+                                return done;
                             }
-                            // Only process data batches; completion markers (batch: None) are ignored
-                            // since the handler is removed immediately after processing data.
-                            // This prevents request ID collisions when IDs wrap around.
                             match res {
                                 Ok(ipc) => {
                                     if let Some(batch_data) = ipc.batch {
@@ -382,13 +382,11 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                                                 &mut time_ranges.sparklines,
                                             );
                                         }
-                                        // Decrement pending_queries now that we have the data
+                                    } else {
                                         time_ranges.pending_queries =
                                             time_ranges.pending_queries.saturating_sub(1);
                                         time_ranges.completed_queries += 1;
                                     }
-                                    // If batch is None (completion marker), just ignore it
-                                    // The handler will be removed either way
                                 }
                                 Err(e) => {
                                     // Error response - query is done
@@ -401,8 +399,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                                     time_ranges.completed_queries += 1;
                                 }
                             }
-                            // Always return true to remove handler immediately, freeing the request ID
-                            true
+                            done
                         },
                     );
                 }
@@ -1217,11 +1214,12 @@ pub fn dispatch_time_range_queries(
             SQLQuery(query),
             move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                   mut time_ranges: ResMut<ComponentTimeRanges>| {
+                // Stay registered until the completion marker (batch: None) so the
+                // request ID is not reused while that marker is still on its way.
+                let done = !res.as_ref().is_ok_and(|ipc| ipc.batch.is_some());
                 if !time_ranges.accepts(generation) {
-                    return true;
+                    return done;
                 }
-                // Completion markers (batch: None) are ignored; the handler is
-                // removed either way, freeing the request id.
                 match res {
                     Ok(ipc) => {
                         if let Some(batch_data) = ipc.batch {
@@ -1230,12 +1228,13 @@ pub fn dispatch_time_range_queries(
                             if let Some(batch) = decoder.decode(&mut buffer).ok().and_then(|b| b) {
                                 process_time_range_and_count(&table_name, &batch, &mut time_ranges);
                             }
+                        } else {
                             finish_time_range_query(&mut time_ranges);
                         }
                     }
                     Err(_) => finish_time_range_query(&mut time_ranges),
                 }
-                true
+                done
             },
         );
     }

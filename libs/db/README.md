@@ -144,6 +144,23 @@ The follower will:
 2. Backfill all historical component time-series data and message logs.
 3. Stream real-time updates as they arrive on the source.
 
+Message replication preserves every log occurrence, including messages with
+identical timestamps and payloads. On reconnect, the follower validates its
+existing prefix before appending new entries. Source and follower must both
+support indexed follow replication; upgrade the source first. Older followers
+remain supported but do not gain this guarantee.
+
+Truncating or replacing a source message log stops replication with an explicit
+history-divergence error. A replica with missing or different entries in its
+stored prefix also stops;
+stop the follower, truncate its database (or use a fresh database), and restart
+it to resynchronize. Truncating a follower message log also resets its binding
+to the source history. Local writers should use
+different message IDs from the followed source.
+
+If preparing a truncation fails, samples are preserved. Already-persisted log
+identities may have changed, so followers may still require resynchronization.
+
 Connect the Elodin Editor to the follower to view the replicated data:
 
 ```sh

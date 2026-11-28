@@ -73,9 +73,7 @@ struct WsAssets(Option<HostOrUrl>);
 struct PendingWsConnect(Option<DbEndpoint>);
 
 fn install_connection(world: &mut World, endpoint: Option<DbEndpoint>, initial: bool) {
-    if world.contains_resource::<crate::RequestQueue>() {
-        crate::cancel_queued_requests(world);
-    }
+    crate::cancel_queued_requests(world);
     if !initial && let Some(mut cache) = world.get_resource_mut::<crate::TelemetryCache>() {
         cache.reset();
     }

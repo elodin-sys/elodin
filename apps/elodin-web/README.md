@@ -78,6 +78,28 @@ just web http://127.0.0.1:3241
 Stop `elodin run` before starting a different example, and reload the page.
 The editor keeps the connection it opened with the document until then.
 
+## Screenshots
+
+After the editor dispatches `elodin-ready`, a host page can capture the window:
+
+```ts
+interface Elodin {
+  captureScreenshot(): Promise<Blob>; // image/png of the full editor canvas
+}
+declare var elodin: Elodin;
+```
+
+`elodin.captureScreenshot()` resolves to an `image/png` blob of the editor canvas,
+including the 3D view and panels. A failed readback or encode rejects with an
+`Error`.
+
+[`screenshot.html`](screenshot.html) is a button and a thumbnail strip that call
+this. Serve it with the database asset URL:
+
+```sh
+just web-screenshot http://127.0.0.1:2241
+```
+
 ## Platform boundary
 
 The editor adapts Bevy's shadow comparison sampling for WebGPU while keeping
@@ -141,3 +163,22 @@ CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
 ```
 
 Use `wasm-bindgen-test-runner` matching `Cargo.lock`, with Chrome and ChromeDriver available.
+
+## Package delivery
+
+A host page can deliver the files of a recording's prepared terrain package itself,
+for example in batches or from its own verified cache, by installing
+`globalThis.elodinFetchPackage`:
+
+```ts
+declare var elodinFetchPackage: (request: Request) => Response | Promise<Response>;
+```
+
+The editor calls it for every package read (manifest, tileset and tile files) with
+the `Request` it would otherwise fetch, and never for terrain-provider requests.
+Return the bytes of exactly `request.url`: status 200 for a file in the package, 404
+for one that is not, which then streams from the provider when the recording allows
+it. Responses get the usual checks: status, a 32 MiB limit, and the request's 20 s
+abort signal. A rejection or a thrown error counts as a network failure and is
+retried. The editor looks the function up at each read, so a host can install or
+remove it at any time. The host is responsible for the bytes it returns.

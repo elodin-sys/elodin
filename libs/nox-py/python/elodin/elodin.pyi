@@ -4,15 +4,151 @@ from collections.abc import Callable, Sequence
 from typing import (
     Any,
     ClassVar,
+    Literal,
     Optional,
     Tuple,
     overload,
 )
 
 import jax
+import numpy
 import polars as pl
 
 from elodin import Archetype
+
+class ComponentHandle:
+    """One component of a fixed list of entities, resolved by `World.prepare_component`."""
+
+    component_id: int
+    name: str
+    access: Literal["read", "write"]
+    dtype: numpy.dtype
+    shape: tuple[int, ...]
+    rows: list[EntityId]
+    entity_ids: list[int]
+    row_bytes: int
+    topology_generation: int
+
+class BatchHandle:
+    """Handles over the same number of rows, from `World.prepare_batch`."""
+
+    fields: dict[str, ComponentHandle]
+
+class BatchView:
+    """A batch's arrays by field name, as attributes or items; also a context manager."""
+
+    def __getattr__(self, name: str) -> numpy.ndarray: ...
+    def __getitem__(self, name: str) -> numpy.ndarray: ...
+    def __enter__(self) -> BatchView: ...
+    def __exit__(self, *exc: object) -> bool: ...
+
+class HistoryHandle:
+    """The committed DB history of an entity's component or of a message log, from
+    `World.prepare_component_history` or `World.prepare_message_history`."""
+
+    name: str
+
+class TimestampedWriter:
+    """Components marked `external_control`, from `World.prepare_timestamped_writer`."""
+
+class WorldStepContext:
+    """Passed to a `pre_commit` callback, which runs after the tick and before the commit.
+
+    Views read the world's current values. Writes to a write handle's view reach the world, and
+    the same commit, when the callback returns; the systems read them on the next tick. Views
+    are copies and end with the callback. History reads see only committed DB samples, and
+    deferred writes land after the commit.
+    """
+
+    tick: int
+    timestamp: int
+    def view(self, handle: ComponentHandle) -> numpy.ndarray:
+        """The handle's rows, read-only for a read handle."""
+        ...
+    def batch(self, batch: BatchHandle) -> BatchView:
+        """Views every field of `batch`."""
+        ...
+    def record(self, handle: ComponentHandle) -> None:
+        """Records the handle's component, recorded with `Recording.manual()`, at this commit."""
+        ...
+    def read_at(
+        self,
+        history: HistoryHandle,
+        timestamp: int,
+        selection: Literal["exact", "at_or_before"],
+    ) -> Optional[tuple[int, numpy.ndarray]]:
+        """The committed sample that `selection` picks at `timestamp`: its timestamp and a copy
+        of its value, or `None`. A message's value is its bytes as `uint8`."""
+        ...
+    def defer_write(
+        self, writer: TimestampedWriter, timestamp: int, values: dict[str, jax.typing.ArrayLike]
+    ) -> None:
+        """Appends `values`, one per key of `writer`, at `timestamp` once this cycle's world
+        commit lands. Writes keep their call order, across callbacks too."""
+        ...
+    def witness_bytes(self, name: str, data: jax.typing.ArrayLike) -> None:
+        """Fills witness channel `name` with the bytes of `data`: every row of its batch, in
+        order. Does nothing when the run records no witness."""
+        ...
+    def witness_replay(self, name: str) -> Optional[numpy.ndarray]:
+        """The recorded bytes of external channel `name`, as `uint8` rows, in a replay that has
+        them; otherwise `None`."""
+        ...
+    def stop_recipes(self) -> None:
+        """Gracefully terminate all s10-managed recipes; see `StepContext.stop_recipes`."""
+        ...
+
+class Timing:
+    """How much a run measures, from least to most perturbing; the receipt reports it."""
+
+    @staticmethod
+    def summary() -> Timing:
+        """Phase times of every cycle; always on."""
+        ...
+    @staticmethod
+    def systems() -> Timing:
+        """Also the time in each compiled function, so each named system, on the Cranelift
+        backend; a system small enough to inline counts toward its caller. Its probes cost
+        `systems.probe_pair_ns` per call and keep calls serial."""
+        ...
+    @staticmethod
+    def operations() -> Timing:
+        """Also sampled time per kind of operation."""
+        ...
+
+class NativeStepHook:
+    """A `pre_commit` hook in a shared library, over the rows of a prepared batch."""
+
+    @staticmethod
+    def load(path: str, input: BatchHandle, symbol: str, workers: int = 1) -> NativeStepHook:
+        """Loads `symbol`, and `{symbol}_init` and `{symbol}_destroy` if present, from the
+        shared library at `path`. Each tick calls `symbol` once per worker, without the GIL,
+        each on a share of the rows."""
+        ...
+
+PreCommit = Callable[[int, WorldStepContext], None] | NativeStepHook
+"""A `pre_commit` hook; a list of them runs in order."""
+
+class Witness:
+    """Batches and hook channels to witness, from `World.prepare_witness`."""
+
+class DeterminismTrace:
+    """Where and how a run records its witness, for `World.run(determinism_trace=...)`."""
+
+    path: str
+    reference: Optional[str]
+    stop_after_first_mismatch: bool
+    def __init__(
+        self,
+        path: str,
+        witness: Witness,
+        raw: bool | tuple[int, int] = False,
+        reference: Optional[str] = None,
+        stop_after_first_mismatch: bool = False,
+    ) -> None:
+        """`raw` keeps the exact bytes of every tick, or of ticks `start..stop`, besides the 16
+        ticks on either side of the first mismatch with `reference`."""
+        ...
 
 class PrimitiveType:
     F64: PrimitiveType
@@ -199,6 +335,7 @@ class ComponentType:
 
 class SystemBuilder:
     cranelift: bool
+    workers: int
     def init_var(self, name: str, ty: ComponentType): ...
     def var_arrays(self) -> list[jax.typing.ArrayLike]: ...
 
@@ -320,7 +457,56 @@ class WorldBuilder:
         start_timestamp: Optional[int] = None,
         log_level: Optional[str] = None,
         backend: str = "cranelift",
+        on_receipt: Optional[Callable[[dict], None]] = None,
+        workers: int = 1,
+        pre_commit: Optional[PreCommit | list[PreCommit]] = None,
+        timing: Optional[Timing] = None,
+        synchronous_commits: bool = False,
+        determinism_trace: Optional[DeterminismTrace] = None,
     ): ...
+    def prepare_component(
+        self,
+        name: str,
+        entities: Sequence[EntityId],
+        access: Literal["read", "write"] = "read",
+    ) -> ComponentHandle:
+        """Resolve the rows of component `name` for `entities`, in that order, for
+        `pre_commit` callbacks to view. Spawning afterwards invalidates the handle."""
+        ...
+    def prepare_batch(self, fields: dict[str, ComponentHandle]) -> BatchHandle:
+        """Group handles over the same number of rows, viewed together by
+        `WorldStepContext.batch`."""
+        ...
+    def prepare_component_history(self, name: str) -> HistoryHandle:
+        """The committed history of the `entity.component` pair `name`, for
+        `WorldStepContext.read_at`."""
+        ...
+    def prepare_message_history(self, name: str) -> HistoryHandle:
+        """The committed history of the message log `name`, for `WorldStepContext.read_at`."""
+        ...
+    def prepare_timestamped_writer(self, fields: dict[str, str]) -> TimestampedWriter:
+        """Components that `WorldStepContext.defer_write` appends to: `fields` maps each value's
+        key to an `entity.component` pair marked `external_control`."""
+        ...
+    def prepare_witness(
+        self,
+        batches: dict[str, BatchHandle],
+        channels: Optional[dict[str, tuple[BatchHandle, int]]] = None,
+        external: Optional[dict[str, tuple[BatchHandle, int]]] = None,
+        stages: Optional[list[str]] = None,
+    ) -> Witness:
+        """The batches and hook channels a run's deterministic witness records. `channels` and
+        `external` map each channel name to `(batch, row_bytes)`: one row per row of one of the
+        batches. External channels hold what came from outside the simulation; a replay feeds
+        them back, and no comparison looks at them. `stages` keeps only the stages it names."""
+        ...
+    def replay_pre_commit(
+        self, trace: str, pre_commit: Optional[PreCommit | list[PreCommit]], live: bool = False
+    ) -> dict:
+        """Runs `pre_commit`, the hooks of the run that recorded `trace`, on the rows its witness
+        kept exactly, without the systems or the DB, and compares what each hook writes with the
+        recording. The hooks read the recorded external channels unless `live`."""
+        ...
     def serve(
         self,
         system: System,
@@ -344,6 +530,8 @@ class WorldBuilder:
         db_path: Optional[str] = None,
         backend: str = "cranelift",
         start_timestamp: Optional[int] = None,
+        workers: int = 1,
+        timing: Optional[Timing] = None,
     ) -> Exec: ...
     def to_jax_func(
         self,
@@ -351,7 +539,8 @@ class WorldBuilder:
         simulation_rate: float = 120.0,
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
-    ) -> Tuple[object, list, list, object, dict, dict, dict]: ...
+        workers: Optional[int] = None,
+    ) -> Tuple[object, list, list, object, dict, dict, dict, dict]: ...
 
 class EntityId:
     def __init__(self, id: int): ...
@@ -495,6 +684,34 @@ class Edge:
     @staticmethod
     def unflatten(aux: Any, jax: Any) -> Any: ...
 
+class Recording:
+    """When a component's values reach the DB, counted in commits."""
+
+    @staticmethod
+    def on_change() -> Recording:
+        """When its bytes differ from the last recorded value; the default."""
+        ...
+    @staticmethod
+    def every_commit() -> Recording:
+        """At every commit, changed or not."""
+        ...
+    @staticmethod
+    def every(n: int) -> Recording:
+        """At every `n`th commit, changed or not."""
+        ...
+    @staticmethod
+    def manual() -> Recording:
+        """At the commits a `pre_commit` callback asks for with `WorldStepContext.record`."""
+        ...
+    @staticmethod
+    def initial_only() -> Recording:
+        """Once, when the run starts."""
+        ...
+    @staticmethod
+    def transient() -> Recording:
+        """Never: the component stays out of the DB, its history, replication and the editor."""
+        ...
+
 class Component:
     asset: bool
     def __init__(
@@ -503,6 +720,7 @@ class Component:
         ty: Optional[ComponentType] = None,
         asset: bool = False,
         metadata: dict[str, str | bool | int] = {},
+        recording: Optional[Recording] = None,
     ): ...
     @staticmethod
     def id(component: Any) -> str:
@@ -526,6 +744,9 @@ class Exec:
         show_progress: bool = True,
         is_canceled: Optional[Callable[[], bool]] = None,
     ): ...
+    def last_receipt(self) -> Optional[dict]:
+        """Phase timings, DB sync counters and backend facts of the latest `run`."""
+        ...
     def profile(self) -> dict[str, float]: ...
     def save_archive(self, path: str, format: str): ...
     def history(self, components: str | list[str]) -> pl.DataFrame: ...

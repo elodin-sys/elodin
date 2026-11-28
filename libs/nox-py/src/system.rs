@@ -1,4 +1,8 @@
-use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    marker::PhantomData,
+    sync::Arc,
+};
 
 use crate::World;
 use crate::exec::ExecSlotMetadata;
@@ -124,6 +128,8 @@ fn output_ty_from_slots(
 pub struct SystemBuilder<'a> {
     pub vars: BTreeMap<ComponentId, ComponentArray<()>>,
     pub inputs: Vec<(ComponentId, Noxpr)>,
+    /// Components an inserted system writes; only these leave the compiled system.
+    pub written: BTreeSet<ComponentId>,
     pub world: &'a World,
 }
 
@@ -132,14 +138,16 @@ impl<'a> SystemBuilder<'a> {
         Self {
             vars: BTreeMap::new(),
             inputs: Vec::new(),
+            written: BTreeSet::new(),
             world,
         }
     }
 
     pub fn to_compiled_system(&self) -> Result<CompiledSystem, Error> {
         let inputs = self.inputs.iter().map(|(_, p)| p).cloned().collect();
-        let mut output = self.vars.values().map(|v| v.buffer.clone());
-        let output = if self.vars.len() == 1 {
+        let output_ids = self.written.iter().copied().collect::<Vec<_>>();
+        let mut output = output_ids.iter().map(|id| self.vars[id].buffer.clone());
+        let output = if output_ids.len() == 1 {
             output.next().expect("iterator empty")
         } else {
             Noxpr::tuple(output.collect())
@@ -149,7 +157,6 @@ impl<'a> SystemBuilder<'a> {
             .iter()
             .map(|(id, _)| slot_metadata_from_column(*id, self.world))
             .collect::<Result<Vec<_>, _>>()?;
-        let output_ids = self.vars.keys().copied().collect::<Vec<_>>();
         let output_slots = output_slots_from_vars(&output_ids, &self.vars, self.world)?;
         let ty = output_ty_from_slots(&output_slots, self.world)?;
         let func = NoxprFn::new(inputs, output);
@@ -299,6 +306,7 @@ impl CompiledSystem {
                 vars.insert(*id, arr);
             }
         }
+        builder.written.extend(self.outputs);
         Ok(())
     }
 }
@@ -805,6 +813,7 @@ impl System for PyFnSystem {
         let mut py_builder = PySystemBuilder {
             total_edges: GraphQuery::<TotalEdge>::param(&builder)?.edges,
             cranelift: world.metadata.cranelift,
+            workers: world.metadata.workers,
             ..Default::default()
         };
         for id in output_ids.iter() {
@@ -970,6 +979,8 @@ pub struct PySystemBuilder {
     pub total_edges: Vec<crate::graph::Edge>,
     #[pyo3(get)]
     pub cranelift: bool,
+    #[pyo3(get)]
+    pub workers: usize,
 }
 
 #[derive(Clone)]

@@ -71,7 +71,6 @@ impl Plugin for HeadlessEditorPlugin {
         if std::env::var("ELODIN_TERRAIN_OFFLINE").as_deref() == Ok("1") {
             app.insert_resource(crate::plugins::terrain_playback::TerrainPlayback {
                 mode: Some(crate::plugins::terrain_playback::TerrainMode::Offline),
-                basemap: None,
             });
         }
         crate::plugins::gpu_info::install_gpu_panic_handler();

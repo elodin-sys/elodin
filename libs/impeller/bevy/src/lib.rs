@@ -98,6 +98,8 @@ pub struct TelemetryCache {
     pivot: Timestamp,
     /// Block a sparse sample is kept for, and that sample's timestamp.
     predecessors: HashMap<ComponentId, BTreeMap<i64, Timestamp>>,
+    /// Exact query timestamps confirmed by predecessor replies, keyed by retention block.
+    predecessor_confirmations: HashMap<ComponentId, BTreeMap<i64, Timestamp>>,
     /// Bytes charged to each one-second block. A predecessor is charged to its closest claim.
     block_bytes: HashMap<ComponentId, BTreeMap<i64, usize>>,
     components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
@@ -417,9 +419,10 @@ impl TelemetryCache {
         &mut self,
         id: ComponentId,
         time: Timestamp,
-        block: i64,
+        confirmed_through: i64,
         value: ComponentValue,
     ) {
+        let block = block_start(confirmed_through);
         let bytes = if self
             .components
             .get(&id)
@@ -443,11 +446,21 @@ impl TelemetryCache {
         self.insert(id, time, value);
         self.byte_limit = limit;
         self.predecessors.entry(id).or_default().insert(block, time);
+        self.predecessor_confirmations
+            .entry(id)
+            .or_default()
+            .insert(block, Timestamp(confirmed_through));
         let to = self.accounting_block(id, time);
         self.relocate_block_bytes(id, from, to, sample_bytes);
     }
 
     pub fn drop_block(&mut self, id: ComponentId, start: i64) {
+        if let Some(confirmations) = self.predecessor_confirmations.get_mut(&id) {
+            confirmations.remove(&start);
+            if confirmations.is_empty() {
+                self.predecessor_confirmations.remove(&id);
+            }
+        }
         let end = start.saturating_add(1_000_000);
         let dropped_anchor = self
             .predecessors
@@ -604,6 +617,40 @@ impl TelemetryCache {
         series.range(..=ts).next_back().map(|(_, v)| v)
     }
 
+    /// Whether the cached hold is known to be the latest sample at `ts`.
+    /// A best-effort display value alone must not suppress a predecessor fetch.
+    pub fn has_covered_hold(&self, component_id: &ComponentId, ts: Timestamp) -> bool {
+        let Some((&sample, _)) = self
+            .components
+            .get(component_id)
+            .and_then(|series| series.range(..=ts).next_back())
+        else {
+            return false;
+        };
+        if sample == ts {
+            return true;
+        }
+        let confirmed = self
+            .predecessors
+            .get(component_id)
+            .into_iter()
+            .flat_map(|claims| claims.iter())
+            .filter(|(_, time)| **time == sample)
+            .filter_map(|(block, _)| {
+                self.predecessor_confirmations
+                    .get(component_id)?
+                    .get(block)
+                    .map(|time| time.0)
+            })
+            .max()
+            .unwrap_or(sample.0)
+            .max(sample.0);
+        confirmed >= ts.0
+            || ts.0.checked_add(1).is_some_and(|end| {
+                self.is_covered(component_id, &(Timestamp(confirmed + 1)..Timestamp(end)))
+            })
+    }
+
     /// True when any samples have been cached for this component.
     pub fn has_series(&self, component_id: &ComponentId) -> bool {
         self.components.contains_key(component_id)
@@ -642,6 +689,7 @@ impl TelemetryCache {
     /// Drop all samples and coverage for a component (unsubscribe / reclaim RAM).
     pub fn remove_series(&mut self, component_id: &ComponentId) {
         self.predecessors.remove(component_id);
+        self.predecessor_confirmations.remove(component_id);
         self.block_bytes.remove(component_id);
         let removed = self.components.remove(component_id);
         if let Some(series) = &removed {
@@ -995,7 +1043,6 @@ pub fn series_store_backfill_candidates(
 #[allow(clippy::too_many_arguments)]
 pub fn backfill_cache(
     schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
-    last_updated: Res<LastUpdated>,
     msg_request_handlers: bevy::prelude::Res<MsgRequestIdHandlers>,
     mut backfill: ResMut<BackfillState>,
     priority: bevy::prelude::Res<SeriesFetchPriority>,
@@ -1023,9 +1070,6 @@ pub fn backfill_cache(
     if msg_request_handlers.len() >= BACKFILL_MAX_CONCURRENT {
         return;
     }
-    if last_updated.0 == Timestamp(i64::MIN) {
-        return;
-    }
     let mut dispatched = 0usize;
     let available = BACKFILL_MAX_CONCURRENT - msg_request_handlers.len();
 
@@ -1047,12 +1091,7 @@ pub fn backfill_cache(
         load_state.components_started = backfill.requested.len();
         // Always stream from the series start so jump-to-beginning / early
         // windows become usable as soon as the first pages arrive.
-        send_backfill_page(
-            &mut commands,
-            component_id,
-            Timestamp(i64::MIN),
-            last_updated.0,
-        );
+        send_backfill_page(&mut commands, component_id, Timestamp(i64::MIN));
         dispatched += 1;
     }
 }
@@ -1064,27 +1103,15 @@ pub fn backfill_cache(
 /// the previous `last_ts + 1`, chaining these spans leaves no unvouched seam —
 /// otherwise frame stepping would stall at every chunk boundary for sparse
 /// series (see [`TelemetryCache::next_sample_after`]).
-/// A completed finite query also proves its empty tail, including an empty series.
-fn backfill_page_coverage(
-    page_start: Timestamp,
-    last_ts: Timestamp,
-    query_end: Timestamp,
-    complete: bool,
-) -> (Timestamp, Timestamp) {
-    let through = if complete { query_end } else { last_ts };
-    (page_start, Timestamp(through.0.saturating_add(1)))
+fn backfill_page_coverage(page_start: Timestamp, last_ts: Timestamp) -> (Timestamp, Timestamp) {
+    (page_start, Timestamp(last_ts.0.saturating_add(1)))
 }
 
-fn send_backfill_page(
-    commands: &mut Commands,
-    component_id: ComponentId,
-    start: Timestamp,
-    end: Timestamp,
-) {
+fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start: Timestamp) {
     let page_start = start;
     let msg = GetTimeSeries {
         id: PacketId::default(),
-        range: start..end,
+        range: start..Timestamp(i64::MAX),
         component_id,
         limit: Some(BACKFILL_CHUNK_SIZE),
     };
@@ -1119,7 +1146,6 @@ fn send_backfill_page(
             let elem_size = schema.size();
             let count = timestamps.len();
             let mut last_ts = start;
-            let mut decoded = 0;
 
             for (i, &timestamp) in timestamps.iter().enumerate() {
                 let offset = i * elem_size;
@@ -1135,15 +1161,12 @@ fn send_backfill_page(
                     let value = ComponentValue::from_view(view);
                     cache.insert(component_id, timestamp, value);
                     last_ts = timestamp;
-                    decoded += 1;
                 }
             }
 
-            let complete = count < BACKFILL_CHUNK_SIZE || last_ts >= end;
-            if decoded == count && (count > 0 || complete) {
-                let (cover_start, cover_end) =
-                    backfill_page_coverage(page_start, last_ts, end, complete);
-                cache.mark_page_covered(component_id, cover_start, cover_end, timestamps);
+            if count > 0 {
+                let (cover_start, cover_end) = backfill_page_coverage(page_start, last_ts);
+                cache.mark_covered(component_id, cover_start, cover_end);
                 load_state.samples_loaded = load_state.samples_loaded.saturating_add(count as u64);
             }
 
@@ -1153,9 +1176,9 @@ fn send_backfill_page(
                 return true;
             }
 
-            if !complete {
+            if count >= BACKFILL_CHUNK_SIZE {
                 // Continue from the beginning forward — usable incrementally.
-                send_backfill_page(&mut cmds, component_id, Timestamp(last_ts.0 + 1), end);
+                send_backfill_page(&mut cmds, component_id, Timestamp(last_ts.0 + 1));
             } else {
                 backfill.complete.insert(component_id);
                 load_state.components_complete = backfill.complete.len();
@@ -1748,10 +1771,11 @@ type MsgReplySystemId = SystemId<InRef<'static, OwnedPacket<PacketGrantR>>, bool
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct MsgRequestQueue(pub VecDeque<(LenPacket, MsgReplySystemId)>);
 
+/// Bounds memory when the DB stops answering; past them a request fails locally.
 const MAX_QUEUED_REQUESTS: usize = 1024;
 const MAX_QUEUED_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 
-/// Main-connection requests waiting for a wire ID or outgoing channel capacity.
+/// Main-connection requests waiting for a free request ID or outgoing channel room.
 #[derive(Resource, Default)]
 pub struct RequestQueue {
     pending: VecDeque<(LenPacket, MsgReplySystemId)>,
@@ -1759,48 +1783,53 @@ pub struct RequestQueue {
 }
 
 impl RequestQueue {
+    /// Drops every queued request without calling its handler.
     pub fn cancel(&mut self, commands: &mut Commands) {
         for (_, handler) in self.pending.drain(..) {
             commands.unregister_system(handler);
         }
         self.bytes = 0;
     }
+}
 
-    /// A seek invalidates queued series reads, but must preserve startup metadata reads.
-    pub fn cancel_series(&mut self, commands: &mut Commands) {
-        self.pending.retain(|(request, handler)| {
+/// A seek makes queued series reads stale. They fail locally so their callers
+/// read the new position instead of waiting behind them; other queued
+/// requests, such as schema and metadata reads, keep their order.
+pub fn cancel_queued_series_requests(world: &mut World) {
+    let Some(mut queue) = world.get_resource_mut::<RequestQueue>() else {
+        return;
+    };
+    let (stale, kept): (VecDeque<_>, VecDeque<_>) = std::mem::take(&mut queue.pending)
+        .into_iter()
+        .partition(|(request, _)| {
             let id = [request.inner[5], request.inner[6]];
-            if id == GetTimeSeries::ID || id == impeller_wkt::GetTimeSeriesPredecessor::ID {
-                self.bytes -= request.inner.len();
-                let handler = *handler;
-                commands.queue(move |world: &mut World| {
-                    fail_request(world, handler, "queued series request canceled by seek");
-                });
-                false
-            } else {
-                true
-            }
+            id == GetTimeSeries::ID || id == impeller_wkt::GetTimeSeriesPredecessor::ID
+        });
+    queue.pending = kept;
+    queue.bytes -= stale
+        .iter()
+        .map(|(request, _)| request.inner.len())
+        .sum::<usize>();
+    if stale.is_empty() {
+        return;
+    }
+    debug!(count = stale.len(), "seek canceled queued series reads");
+    for (_, handler) in stale {
+        world.commands().queue(move |world: &mut World| {
+            fail_request(world, handler, "queued series request canceled by seek");
         });
     }
 }
 
 pub fn cancel_queued_requests(world: &mut World) {
-    if !world.contains_resource::<RequestQueue>() {
+    let Some(mut queue) = world.get_resource_mut::<RequestQueue>() else {
         return;
-    }
-    world.resource_scope(|world, mut queue: Mut<RequestQueue>| {
-        queue.cancel(&mut world.commands());
-    });
-}
-
-pub fn cancel_queued_series_requests(world: &mut World) {
-    if world.contains_resource::<RequestQueue>() {
-        world.resource_scope(|world, mut queue: Mut<RequestQueue>| {
-            queue.cancel_series(&mut world.commands());
-        });
-    }
-    if let Some(mut prefetch) = world.get_resource_mut::<VisiblePrefetchState>() {
-        prefetch.clear_in_flight();
+    };
+    queue.bytes = 0;
+    for (_, handler) in std::mem::take(&mut queue.pending) {
+        if let Err(err) = world.unregister_system(handler) {
+            bevy::log::error!(?err, "failed to unregister queued request handler");
+        }
     }
 }
 
@@ -2274,6 +2303,7 @@ where
         if queue.pending.len() >= MAX_QUEUED_REQUESTS
             || self.request.inner.len() > MAX_QUEUED_REQUEST_BYTES - queue.bytes
         {
+            bevy::log::warn!("main request queue is full; failing the request");
             fail_request(world, system_id, "main request queue capacity exceeded");
             return;
         }
@@ -2283,11 +2313,12 @@ where
     }
 }
 
+/// Answers a request that was never sent with a local [`ErrorResponse`], so its
+/// caller takes the same path as for a refused request.
 fn fail_request(world: &mut World, handler: MsgReplySystemId, description: &str) {
     use bbqueue::{ArcBBQueue, traits::storage::BoxedSlice};
     use impeller_bbq::{PacketGrantW, RxExt};
 
-    bevy::log::warn!(description, "main request failed before transmission");
     let error = (&ErrorResponse {
         description: description.into(),
     })
@@ -2349,7 +2380,10 @@ pub fn flush_request_queue(world: &mut World) {
                     .push_front((packet, handler));
                 break;
             }
-            _ => fail_request(world, handler, "main connection is unavailable"),
+            _ => {
+                bevy::log::warn!("main connection is unavailable; failing a queued request");
+                fail_request(world, handler, "main connection is unavailable");
+            }
         }
         world.resource_mut::<RequestQueue>().bytes -= bytes;
     }
@@ -3169,8 +3203,7 @@ mod series_store_allowlist_tests {
         for micros in [0i64, 1000, 2000] {
             sample(&mut cache, id, micros);
         }
-        let (start, end) =
-            backfill_page_coverage(Timestamp(i64::MIN), Timestamp(2000), Timestamp(5000), false);
+        let (start, end) = backfill_page_coverage(Timestamp(i64::MIN), Timestamp(2000));
         cache.mark_covered(id, start, end);
 
         // Page 2: requested from the previous page's last_ts + 1 (2001), even
@@ -3178,8 +3211,7 @@ mod series_store_allowlist_tests {
         for micros in [3000i64, 4000] {
             sample(&mut cache, id, micros);
         }
-        let (start, end) =
-            backfill_page_coverage(Timestamp(2001), Timestamp(4000), Timestamp(5000), false);
+        let (start, end) = backfill_page_coverage(Timestamp(2001), Timestamp(4000));
         cache.mark_covered(id, start, end);
 
         // Stepping crosses the page boundary: 2000 (end of page 1) -> 3000
@@ -3196,32 +3228,6 @@ mod series_store_allowlist_tests {
         assert_eq!(
             cache.next_sample_after(&id, Timestamp(3000)),
             Some(Timestamp(4000))
-        );
-    }
-
-    #[test]
-    fn completed_backfill_proves_empty_tails_only_through_its_query_end() {
-        let id = ComponentId(1);
-        let mut cache = TelemetryCache::default();
-        let (start, end) = backfill_page_coverage(
-            Timestamp(i64::MIN),
-            Timestamp(0),
-            Timestamp(500_000_000),
-            true,
-        );
-        cache.mark_covered(id, start, end);
-        assert!(cache.is_covered(&id, &(Timestamp(0)..Timestamp(500_000_001))));
-        assert!(!cache.is_covered(&id, &(Timestamp(0)..Timestamp(500_000_002))));
-        assert!(
-            !cache.has_series(&id),
-            "an empty successful query still establishes coverage"
-        );
-        let (_, partial_end) =
-            backfill_page_coverage(Timestamp(0), Timestamp(1000), Timestamp(500_000_000), false);
-        assert_eq!(
-            partial_end,
-            Timestamp(1001),
-            "a full page cannot prove its unread tail"
         );
     }
 
@@ -3652,37 +3658,72 @@ mod request_queue_tests {
     }
 
     #[test]
-    fn request_queue_seek_preserves_metadata_and_reconnect_cancels_everything() {
+    fn request_queue_seek_fails_series_reads_and_keeps_other_requests_in_order() {
         let (mut world, _rx) = world(4096);
         for tag in 0..255 {
             submit(&mut world, schema(), tag);
         }
-        submit(
-            &mut world,
+        let anchor = |timestamp| {
             (&impeller_wkt::GetTimeSeriesPredecessor {
                 id: [0, 0],
-                timestamp: Timestamp(20),
+                timestamp: Timestamp(timestamp),
                 component_id: ComponentId(1),
             })
-                .into_len_packet(),
-            255,
-        );
+                .into_len_packet()
+        };
+        submit(&mut world, anchor(20), 255);
         submit(&mut world, schema(), 256);
+        submit(&mut world, anchor(30), 257);
+        submit(&mut world, schema(), 258);
+        let kept_bytes = 2 * schema().inner.len();
+        cancel_queued_series_requests(&mut world);
+        world.flush();
+        let queue = world.resource::<RequestQueue>();
+        assert_eq!(queue.pending.len(), 2);
+        assert_eq!(queue.bytes, kept_bytes);
+        assert_eq!(
+            world.resource::<Replies>().0,
+            vec![(255, true), (257, true)]
+        );
+
+        let newest = queue.pending[1].1;
+        let id = *world.resource::<RequestIdHandlers>().keys().next().unwrap();
+        let handler = world
+            .resource_mut::<RequestIdHandlers>()
+            .remove(&id)
+            .unwrap();
+        world.unregister_system(handler).unwrap();
+        flush_request_queue(&mut world);
+        let queue = world.resource::<RequestQueue>();
+        assert_eq!(queue.pending.len(), 1);
+        assert_eq!(
+            queue.pending[0].1, newest,
+            "the oldest kept request goes first"
+        );
+    }
+
+    #[test]
+    fn request_queue_reconnect_drops_queued_requests_without_replies() {
+        let (mut world, _rx) = world(4096);
+        for tag in 0..257 {
+            submit(&mut world, schema(), tag);
+        }
         let handlers: Vec<_> = world
             .resource::<RequestQueue>()
             .pending
             .iter()
             .map(|(_, handler)| *handler)
             .collect();
-        cancel_queued_series_requests(&mut world);
-        world.flush();
-        assert_eq!(world.resource::<RequestQueue>().pending.len(), 1);
-        assert!(world.unregister_system(handlers[0]).is_err());
+        assert_eq!(handlers.len(), 2);
         cancel_queued_requests(&mut world);
-        world.flush();
         assert!(world.resource::<RequestQueue>().pending.is_empty());
         assert_eq!(world.resource::<RequestQueue>().bytes, 0);
-        assert!(world.unregister_system(handlers[1]).is_err());
-        assert_eq!(world.resource::<Replies>().0, vec![(255, true)]);
+        assert!(
+            handlers
+                .iter()
+                .all(|h| world.unregister_system(*h).is_err())
+        );
+        assert!(world.resource::<Replies>().0.is_empty());
+        assert_eq!(world.resource::<RequestIdHandlers>().len(), 255);
     }
 }

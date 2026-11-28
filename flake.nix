@@ -83,7 +83,7 @@
       in {
         packages = with pkgs.elodin; {
           inherit elodin-cli elodin-db elodin-db-protos elodin-web elodinsink rtsp-streamer;
-          elodin-web-progressive = pkgs.callPackage ./experiments/terrain-progressive/package.nix {base = elodin-web;};
+          elodin-web-diagnostics = pkgs.callPackage ./experiments/terrain-progressive/package.nix {base = elodin-web;};
           elodin-py = elodin-py.py;
           elodin = elodin-cli;
           default = elodin-cli;

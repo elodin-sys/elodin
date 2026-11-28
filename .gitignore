@@ -38,6 +38,8 @@ __pycache__
 
 # Optional MLIR regression fixtures (customer artifacts, too large for git)
 **/*.stablehlo.mlir
+# The elodin-model test model is hand-written and a few lines long.
+!libs/elodin-model/tests/fixtures/**/*.stablehlo.mlir
 
 # examples
 betaflight_*

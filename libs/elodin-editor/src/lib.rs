@@ -737,6 +737,8 @@ impl Plugin for EditorPlugin {
         app.add_plugins(plugins::cinematic_earth::CinematicEarthPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::screenshot::EnvScreenshotPlugin);
+        #[cfg(target_family = "wasm")]
+        app.add_plugins(plugins::web_screenshot::WebScreenshotPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::fps_log::EnvFpsLogPlugin);
         app.add_plugins(ui::UiPlugin)
@@ -770,8 +772,8 @@ impl Plugin for EditorPlugin {
                 PreUpdate,
                 (
                     clamp_current_time,
-                    advance_playback.run_if(plugins::cesium::playback_ready),
-                    follow_latest.run_if(plugins::cesium::playback_ready),
+                    advance_playback,
+                    follow_latest,
                     // Update selection after playback advances to keep line_3d and object_3d in sync.
                     set_selected_range,
                     impeller_bevy::apply_cached_data,

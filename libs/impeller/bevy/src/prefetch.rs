@@ -153,9 +153,7 @@ pub fn hold_anchor_decision(
     series_store: &TelemetryCache,
     prefetch: &VisiblePrefetchState,
 ) -> HoldAnchorDecision {
-    if series_store
-        .get_at_or_before(&component_id, start)
-        .is_some()
+    if series_store.has_covered_hold(&component_id, start)
         || series_store.is_covered(
             &component_id,
             &(Timestamp(i64::MIN)..Timestamp(start.0.saturating_add(1))),
@@ -189,7 +187,21 @@ pub fn apply_hold_anchor_payload(
     schema_reg: &ComponentSchemaRegistry,
 ) -> bool {
     if timestamps.is_empty() {
-        return buf.is_empty();
+        // An empty reply cannot confirm a cache that already contains an older
+        // sample. Keep the retry delay for this inconsistent response.
+        if !buf.is_empty()
+            || series_store
+                .get_at_or_before(&component_id, start)
+                .is_some()
+        {
+            return false;
+        }
+        let Some(end) = start.0.checked_add(1) else {
+            return false;
+        };
+        let range = Timestamp(i64::MIN)..Timestamp(end);
+        series_store.mark_covered(component_id, range.start, range.end);
+        return series_store.is_covered(&component_id, &range);
     }
     let (Some(&timestamp), Some(schema)) = (timestamps.first(), schema_reg.0.get(&component_id))
     else {
@@ -208,12 +220,10 @@ pub fn apply_hold_anchor_payload(
     series_store.insert_predecessor(
         component_id,
         timestamp,
-        playback::block_start(start.0),
+        start.0,
         ComponentValue::from_view(view),
     );
-    series_store
-        .get_at_or_before(&component_id, start)
-        .is_some()
+    series_store.has_covered_hold(&component_id, start)
 }
 
 fn apply_hold_anchor_reply(
@@ -283,17 +293,6 @@ pub fn prefetch_hold_anchor(
             }
             let confirmed =
                 apply_hold_anchor_reply(&pkt, component_id, start, &mut series_store, &schema_reg);
-            if confirmed
-                && series_store
-                    .get_at_or_before(&component_id, start)
-                    .is_none()
-            {
-                series_store.mark_covered(
-                    component_id,
-                    Timestamp(i64::MIN),
-                    Timestamp(start.0.saturating_add(1)),
-                );
-            }
             prefetch.finish(key, attempt, confirmed);
             true
         },
@@ -650,4 +649,184 @@ fn send_admitted_page(
             true
         },
     );
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    #[test]
+    fn rejected_or_inconsistent_hold_replies_keep_retry_delay() {
+        let id = ComponentId(981);
+        let query = Timestamp(40_500_000);
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            impeller::schema::Schema::new(impeller::types::PrimType::F64, [0usize; 0]).unwrap(),
+        );
+        for empty in [false, true] {
+            let mut cache = TelemetryCache::default();
+            cache.insert(
+                id,
+                Timestamp(40_100_000),
+                ComponentValue::F64(nox::array![10f64].to_dyn()),
+            );
+            cache.set_playback_budget(cache.resident_bytes(), query);
+            let mut prefetch = VisiblePrefetchState::default();
+            let key = PrefetchKey::Anchor {
+                component_id: id,
+                start: query.0,
+            };
+            let attempt = prefetch.begin(key).unwrap();
+            let confirmed = if empty {
+                apply_hold_anchor_payload(&[], &[], id, query, &mut cache, &schemas)
+            } else {
+                apply_hold_anchor_payload(
+                    &[Timestamp(40_300_000)],
+                    &30f64.to_le_bytes(),
+                    id,
+                    query,
+                    &mut cache,
+                    &schemas,
+                )
+            };
+            assert!(!confirmed);
+            assert_eq!(cache.total_sample_count(), 1);
+            prefetch.finish(key, attempt, confirmed);
+            assert!(matches!(
+                prefetch.requests.get(&key),
+                Some(PrefetchRequestState::RetryAt(_))
+            ));
+            assert_eq!(
+                hold_anchor_decision(id, query, &cache, &prefetch),
+                HoldAnchorDecision::Pending
+            );
+        }
+    }
+
+    #[test]
+    fn empty_hold_reply_confirms_absence_without_repeated_fetches() {
+        let id = ComponentId(981);
+        let query = Timestamp(40_500_000);
+        let mut cache = TelemetryCache::default();
+        assert!(apply_hold_anchor_payload(
+            &[],
+            &[],
+            id,
+            query,
+            &mut cache,
+            &ComponentSchemaRegistry::default()
+        ));
+        assert_eq!(
+            hold_anchor_decision(id, query, &cache, &VisiblePrefetchState::default()),
+            HoldAnchorDecision::Satisfied
+        );
+        assert_eq!(cache.total_sample_count(), 0);
+    }
+
+    #[test]
+    fn unaligned_predecessor_reply_confirms_exact_query_until_eviction() {
+        let id = ComponentId(981);
+        let mut cache = TelemetryCache::default();
+        let prefetch = VisiblePrefetchState::default();
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            impeller::schema::Schema::new(impeller::types::PrimType::F64, [0usize; 0]).unwrap(),
+        );
+        let query = Timestamp(40_500_000);
+        assert_eq!(
+            hold_anchor_decision(id, query, &cache, &prefetch),
+            HoldAnchorDecision::Request
+        );
+        assert!(apply_hold_anchor_payload(
+            &[Timestamp(30_000_000)],
+            &30f64.to_le_bytes(),
+            id,
+            query,
+            &mut cache,
+            &schemas
+        ));
+        assert_eq!(
+            hold_anchor_decision(id, query, &cache, &prefetch),
+            HoldAnchorDecision::Satisfied
+        );
+        assert!(cache.has_covered_hold(&id, Timestamp(query.0 - 1)));
+        assert!(!cache.has_covered_hold(&id, Timestamp(query.0 + 1)));
+        cache.drop_block(id, playback::block_start(query.0));
+        cache.insert(
+            id,
+            Timestamp(30_000_000),
+            ComponentValue::F64(nox::array![30f64].to_dyn()),
+        );
+        assert_eq!(
+            hold_anchor_decision(id, query, &cache, &prefetch),
+            HoldAnchorDecision::Request
+        );
+        assert!(apply_hold_anchor_payload(
+            &[Timestamp(30_000_000)],
+            &30f64.to_le_bytes(),
+            id,
+            query,
+            &mut cache,
+            &schemas
+        ));
+        cache.remove_series(&id);
+        cache.insert(
+            id,
+            Timestamp(30_000_000),
+            ComponentValue::F64(nox::array![30f64].to_dyn()),
+        );
+        assert!(!cache.has_covered_hold(&id, query));
+    }
+
+    #[test]
+    fn seek_across_gap_requests_a_new_predecessor() {
+        let id = ComponentId(981);
+        let mut cache = TelemetryCache::default();
+        let prefetch = VisiblePrefetchState::default();
+        let value = ComponentValue::F64(nox::array![10f64].to_dyn());
+        cache.insert(id, Timestamp(10), value.clone());
+        cache.mark_covered(id, Timestamp(0), Timestamp(11));
+        assert_eq!(
+            hold_anchor_decision(id, Timestamp(40), &cache, &prefetch),
+            HoldAnchorDecision::Request
+        );
+        cache.mark_covered(id, Timestamp(35), Timestamp(41));
+        assert_eq!(
+            hold_anchor_decision(id, Timestamp(40), &cache, &prefetch),
+            HoldAnchorDecision::Request
+        );
+        cache.insert_predecessor(
+            id,
+            Timestamp(30),
+            40,
+            ComponentValue::F64(nox::array![30f64].to_dyn()),
+        );
+        assert_eq!(
+            hold_anchor_decision(id, Timestamp(40), &cache, &prefetch),
+            HoldAnchorDecision::Satisfied
+        );
+        assert!(!cache.has_covered_hold(&id, Timestamp(42)));
+        cache.mark_covered(id, Timestamp(41), Timestamp(43));
+        assert!(cache.has_covered_hold(&id, Timestamp(42)));
+    }
+
+    #[test]
+    fn complete_coverage_and_exact_samples_keep_valid_holds() {
+        let id = ComponentId(981);
+        let mut cache = TelemetryCache::default();
+        cache.insert(
+            id,
+            Timestamp(10),
+            ComponentValue::F64(nox::array![10f64].to_dyn()),
+        );
+        assert!(cache.has_covered_hold(&id, Timestamp(10)));
+        assert!(!cache.has_covered_hold(&id, Timestamp(9)));
+        cache.mark_covered(id, Timestamp(11), Timestamp(40));
+        assert!(!cache.has_covered_hold(&id, Timestamp(40)));
+        cache.mark_covered(id, Timestamp(40), Timestamp(41));
+        assert!(cache.has_covered_hold(&id, Timestamp(40)));
+        assert!(!cache.has_covered_hold(&id, Timestamp(i64::MAX)));
+    }
 }

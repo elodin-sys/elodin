@@ -36,12 +36,13 @@ pub struct EnvScreenshotPlugin;
 impl Plugin for EnvScreenshotPlugin {
     fn build(&self, app: &mut App) {
         if std::env::var("ELODIN_SCREENSHOT").is_ok() {
-            app.add_systems(
-                Update,
-                (stage_screenshot, capture_screenshot)
-                    .chain()
-                    .after(bevy_cesium::CesiumSet::Publish),
-            );
+            app.insert_resource(super::cesium::TerrainCapture::from_env())
+                .add_systems(
+                    Update,
+                    (stage_screenshot, capture_screenshot)
+                        .chain()
+                        .after(bevy_cesium::CesiumSet::Publish),
+                );
         }
     }
 }

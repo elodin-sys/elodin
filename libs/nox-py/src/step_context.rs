@@ -13,6 +13,7 @@ use pyo3::types::PyDict;
 use stellarator::util::CancelToken;
 
 use crate::Error;
+use crate::prepared::CallbackCounters;
 
 /// Helper function to convert a byte buffer to a numpy array based on primitive type.
 fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> Bound<'py, PyAny> {
@@ -121,6 +122,7 @@ pub struct StepContext {
     start_timestamp: Timestamp,
     /// Optional cancel token to gracefully terminate s10-managed recipes
     recipe_cancel_token: Option<CancelToken>,
+    counters: Arc<CallbackCounters>,
 }
 
 impl StepContext {
@@ -131,6 +133,7 @@ impl StepContext {
         tick: u64,
         start_timestamp: Timestamp,
         recipe_cancel_token: Option<CancelToken>,
+        counters: Arc<CallbackCounters>,
     ) -> Self {
         Self {
             db,
@@ -139,7 +142,14 @@ impl StepContext {
             tick_counter,
             start_timestamp,
             recipe_cancel_token,
+            counters,
         }
+    }
+
+    fn count_operation(&self) {
+        self.counters
+            .legacy_operations
+            .fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -147,6 +157,55 @@ impl StepContext {
 mod tests {
     use super::*;
     use impeller::types::msg_id;
+
+    #[test]
+    fn truncate_reports_persistence_failure_before_resetting_simulation_time() {
+        pyo3::prepare_freethreaded_python();
+        let dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(DB::create(dir.path().join("db")).unwrap());
+        let id = msg_id("truncate.failure");
+        db.push_msg(Timestamp(100), id, b"keep").unwrap();
+        let ticks = Arc::new(AtomicU64::new(7));
+        let ctx = StepContext::new(
+            db.clone(),
+            ticks.clone(),
+            Timestamp(100),
+            7,
+            Timestamp(10),
+            None,
+            Default::default(),
+        );
+        let pending = db
+            .path
+            .join("msgs")
+            .join(u16::from_le_bytes(id).to_string())
+            .join("follow_generation.pending");
+        std::fs::create_dir(&pending).unwrap();
+        let error = ctx.truncate().unwrap_err();
+        Python::with_gil(|py| {
+            assert!(error.is_instance_of::<pyo3::exceptions::PyRuntimeError>(py));
+        });
+        assert_eq!(ticks.load(Ordering::SeqCst), 7);
+        assert_eq!(ctx.timestamp.load(Ordering::SeqCst), 100);
+        db.with_state_mut(|state| {
+            let log = state.get_or_insert_msg_log(id, &db.path).unwrap();
+            assert_eq!(log.get_index(0).unwrap().1.as_ref(), b"keep");
+        });
+
+        std::fs::remove_dir(pending).unwrap();
+        ctx.truncate().unwrap();
+        assert_eq!(ticks.load(Ordering::SeqCst), 0);
+        assert_eq!(ctx.timestamp.load(Ordering::SeqCst), 10);
+        db.with_state_mut(|state| {
+            assert!(
+                state
+                    .get_or_insert_msg_log(id, &db.path)
+                    .unwrap()
+                    .timestamps()
+                    .is_empty()
+            );
+        });
+    }
 
     #[test]
     fn read_msg_latest_returns_timestamp_and_payload() {
@@ -162,6 +221,7 @@ mod tests {
             0,
             Timestamp::EPOCH,
             None,
+            Default::default(),
         );
 
         Python::with_gil(|py| {
@@ -194,6 +254,7 @@ mod tests {
             0,
             Timestamp::EPOCH,
             None,
+            Default::default(),
         );
 
         Python::with_gil(|py| {
@@ -250,6 +311,7 @@ impl StepContext {
         data: &Bound<'_, PyUntypedArray>,
         timestamp: Option<i64>,
     ) -> Result<(), Error> {
+        self.count_operation();
         let pair_id = ComponentId::new(pair_name);
 
         // Use provided timestamp or fall back to current simulation timestamp
@@ -322,6 +384,7 @@ impl StepContext {
         pair_name: &str,
         timestamp: Option<i64>,
     ) -> Result<Bound<'py, PyAny>, Error> {
+        self.count_operation();
         let pair_id = ComponentId::new(pair_name);
 
         self.db.with_state(|state| {
@@ -386,6 +449,7 @@ impl StepContext {
         msg_name: &str,
         timestamp: Option<i64>,
     ) -> Result<Option<Bound<'py, PyAny>>, Error> {
+        self.count_operation();
         let msg_id = impeller::types::msg_id(msg_name);
 
         self.db.with_state(|state| {
@@ -423,6 +487,7 @@ impl StepContext {
         msg_name: &str,
         timestamp: i64,
     ) -> Result<Option<(i64, Bound<'py, PyAny>)>, Error> {
+        self.count_operation();
         let msg_id = impeller::types::msg_id(msg_name);
         self.db.with_state(|state| {
             let Some(msg_log) = state.get_msg_log(msg_id) else {
@@ -450,6 +515,7 @@ impl StepContext {
         py: Python<'py>,
         msg_name: &str,
     ) -> Result<Option<(i64, Bound<'py, PyAny>)>, Error> {
+        self.count_operation();
         let msg_id = impeller::types::msg_id(msg_name);
         self.db.with_state(|state| {
             let Some(msg_log) = state.get_msg_log(msg_id) else {
@@ -484,13 +550,16 @@ impl StepContext {
     ///
     /// After truncate(), any subsequent write_component() calls in the same callback will write
     /// at the start timestamp (tick 0), preventing TimeTravel errors on the next tick.
-    fn truncate(&self) {
-        self.db.truncate();
+    fn truncate(&self) -> pyo3::PyResult<()> {
+        self.db
+            .truncate()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         self.tick_counter.store(0, Ordering::SeqCst);
         // Reset timestamp to start_timestamp (tick 0) so any subsequent write_component()
         // calls in this callback write at the correct timestamp
         self.timestamp
             .store(self.start_timestamp.0, Ordering::SeqCst);
+        Ok(())
     }
 
     /// Gracefully terminate all s10-managed recipes (external processes).
@@ -555,6 +624,7 @@ impl StepContext {
         write_timestamps: Option<&Bound<'py, PyDict>>,
         read_timestamps: Option<&Bound<'py, PyDict>>,
     ) -> Result<Bound<'py, PyDict>, Error> {
+        self.count_operation();
         // Pre-parse all component IDs outside the lock
         let read_ids: Vec<(String, ComponentId)> = reads
             .iter()

@@ -23,6 +23,8 @@ pub mod integrator;
 pub mod jax_exec;
 pub mod linalg;
 pub mod monte_carlo;
+pub mod native_hook;
+pub mod prepared;
 pub mod profile;
 pub mod query;
 pub mod s10;
@@ -33,6 +35,7 @@ pub mod system;
 pub mod tick_metrics;
 pub mod ui;
 pub mod utils;
+pub mod witness;
 pub mod world;
 pub mod world_builder;
 
@@ -181,15 +184,32 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<GraphQueryInner>()?;
     m.add_class::<PyEdge>()?;
     m.add_class::<PyComponent>()?;
+    m.add_class::<Recording>()?;
     m.add_class::<Integrator>()?;
     m.add_class::<PyFnSystem>()?;
     m.add_class::<QueryMetadata>()?;
     m.add_class::<PySystemBuilder>()?;
     m.add_class::<PySystem>()?;
     m.add_class::<StepContext>()?;
+    m.add_class::<prepared::WorldStepContext>()?;
+    m.add_class::<prepared::HistoryHandle>()?;
+    m.add_class::<prepared::TimestampedWriter>()?;
+    m.add_class::<prepared::ComponentHandle>()?;
+    m.add_class::<prepared::BatchHandle>()?;
+    m.add_class::<prepared::BatchView>()?;
+    m.add_class::<native_hook::NativeStepHook>()?;
+    m.add_class::<tick_metrics::Timing>()?;
     m.add_function(wrap_pyfunction!(py_six_dof, m)?)?;
     m.add_function(wrap_pyfunction!(skew, m)?)?;
     m.add_function(wrap_pyfunction!(_get_cache_dir, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        cranelift_compile::_compile_stablehlo_object,
+        m
+    )?)?;
+    m.add_function(wrap_pyfunction!(
+        cranelift_compile::_stablehlo_object_target,
+        m
+    )?)?;
     m.add(
         "__version__",
         concat!(env!("CARGO_PKG_VERSION"), "+", env!("GIT_HASH")),
@@ -198,6 +218,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     monte_carlo::register(m)?;
     db::register(m)?;
     ui::register(m)?;
+    witness::register(m)?;
     // try_init: the db module may have installed a tracing subscriber (which
     // claims the global `log` logger) when ELODIN_DB_LOG is set.
     let _ = env_logger::try_init();

@@ -39,6 +39,24 @@ Lowered MLIR, first-tick checkpoint, structured profile JSON, and
 every stderr report all land flat under `/tmp/dbg/`. See
 [`PERFORMANCE.md`](PERFORMANCE.md) for the full list of outputs.
 
+## Ahead-of-Time Objects
+
+`lower::compile_module_to_object` runs the same lowering into a position-independent object
+file instead of JIT memory. The object defines `{prefix}_step` with the JIT `main`'s signature;
+its calls into the runtime (libm shims, `tensor_rt`, LAPACK) go through a table it exports
+alongside their names, which the loader fills from `lower::runtime_symbol`. With `workers` above
+1, independent calls form groups as in the JIT and run through `pool::run` on whatever pool
+threads the loader starts; the compiler starts none. `libs/elodin-model` is that loader;
+[examples/ball-cpp](../../examples/ball-cpp) and [examples/many-agents-cpp](../../examples/many-agents-cpp)
+run it end to end.
+
+Object export accepts `cpu="native"` or `"generic"`. Native enables detected host features;
+generic keeps the target architecture's baseline for delivery to another CPU of that
+architecture. The target OS and architecture remain those of the export process, so for another
+platform the object is compiled there: [`examples/compile-object.rs`](examples/compile-object.rs)
+turns a StableHLO file into an object with Cargo alone, and `libs/elodin-model/package.py --cpu`
+runs it.
+
 ## Adding a New Op
 
 1. Add the `Instruction` variant in `src/ir.rs`

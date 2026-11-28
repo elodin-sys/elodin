@@ -13,7 +13,6 @@ use bevy_cesium::{
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 
 pub struct CesiumPlugin;
-pub use super::terrain_priority::TerrainPriority;
 
 #[derive(Resource, Default)]
 struct RetryTerrain(bool);
@@ -87,6 +86,17 @@ pub(crate) struct TerrainCapture {
     timeout: std::time::Duration,
 }
 impl TerrainCapture {
+    pub(super) fn from_env() -> Self {
+        Self {
+            started: web_time::Instant::now(),
+            timeout: std::time::Duration::from_secs_f64(env_positive(
+                "ELODIN_CESIUM_CAPTURE_TIMEOUT",
+                120.0,
+                false,
+            )),
+        }
+    }
+
     pub(crate) fn ready(&self, status: Option<&CesiumStatus>) -> Result<bool, &'static str> {
         if status.is_some_and(|s| s.load_failed) {
             return Err(status
@@ -126,6 +136,7 @@ impl TerrainStartup {
     // Interactive replay may stream while playing, but that is not evidence that
     // terrain is ready for a held simulation or a sensor capture. Read the gate
     // from the current DB config: it can arrive after the schematic.
+    #[cfg(test)]
     fn replay_can_stream(&self, config: Option<&impeller_wkt::DbConfig>, headless: bool) -> bool {
         !headless
             && !config.is_some_and(|config| {
@@ -147,11 +158,17 @@ impl TerrainStartup {
         if self.ready || self.error.is_some() {
             return;
         }
+        // A hierarchy cap or a missed tile still leaves the published scenery
+        // usable. Keep waiting while nothing is on screen.
         if status.load_failed {
-            self.error = Some(status.error.unwrap_or("Terrain capture failed to load"));
-        } else {
-            self.ready = status.ready_for_capture();
+            if self.has_tiles {
+                self.ready = true;
+            } else {
+                self.error = Some(status.error.unwrap_or("Terrain capture failed to load"));
+            }
+            return;
         }
+        self.ready = status.ready_for_capture();
     }
 
     pub(super) fn result(&self) -> Result<bool, &'static str> {
@@ -172,17 +189,23 @@ pub(crate) fn capture_readiness(
     capture: Option<&TerrainCapture>,
     status: Option<&CesiumStatus>,
 ) -> Result<bool, &'static str> {
-    if let Some(startup) = startup
-        && let Err(error) = startup.result()
+    // Schematics without terrain never insert startup. A screenshot gate must
+    // not time out waiting for a Cesium status that will not arrive.
+    let Some(startup) = startup else {
+        return Ok(true);
+    };
+    startup.result()?;
+    if startup.ready || status.is_some_and(|status| status.load_failed && status.visible_tiles > 0)
     {
-        return Err(error);
+        return Ok(true);
     }
     if let Some(capture) = capture {
         return capture.ready(status);
     }
-    Ok(startup.is_none_or(|startup| startup.ready))
+    Ok(false)
 }
 
+#[cfg(test)]
 pub(crate) fn playback_ready(world: &World) -> bool {
     world
         .get_resource::<TerrainStartup>()
@@ -208,7 +231,6 @@ fn camera_position_ecef(
 impl Plugin for CesiumPlugin {
     fn build(&self, app: &mut App) {
         super::terrain_playback::install(app);
-        app.init_resource::<TerrainPriority>();
         app.init_resource::<RetryTerrain>();
         if let Ok(path) = std::env::var("ELODIN_CESIUM_CAPTURE_VIEWS") {
             let bytes = std::fs::read(path).expect("Cannot read ELODIN_CESIUM_CAPTURE_VIEWS");
@@ -219,14 +241,7 @@ impl Plugin for CesiumPlugin {
             );
             app.insert_resource(CesiumDetailViews(views))
                 .insert_resource(CesiumSelectionMode::Fixed)
-                .insert_resource(TerrainCapture {
-                    started: web_time::Instant::now(),
-                    timeout: std::time::Duration::from_secs_f64(env_positive(
-                        "ELODIN_CESIUM_CAPTURE_TIMEOUT",
-                        120.0,
-                        false,
-                    )),
-                });
+                .insert_resource(TerrainCapture::from_env());
         }
         app.add_plugins(
             StreamingPlugin::deferred()
@@ -245,14 +260,8 @@ impl Plugin for CesiumPlugin {
                     .and_then(resource_exists::<Messages<crate::ui::schematic::DocumentReloaded>>),
             ),
         )
-        .add_systems(Update, configure_terrain.before(CesiumSet::Views))
+        .add_systems(Update, configure_terrain.before(CesiumSet::Stream))
         .add_systems(Update, collect_views.in_set(CesiumSet::Views))
-        .add_systems(
-            Update,
-            super::terrain_priority::update
-                .in_set(CesiumSet::Views)
-                .after(collect_views),
-        )
         .add_systems(Update, place_tiles.in_set(CesiumSet::Placement))
         .add_systems(
             Update,
@@ -331,9 +340,6 @@ fn configure_terrain(world: &mut World, mut previous: Local<Option<TerrainConfig
     let terrain = schematic.terrain.clone();
     let endpoint = endpoint.cloned();
     *previous = Some((terrain.clone(), endpoint.clone(), policy.clone()));
-    if let Some(mut priority) = world.get_resource_mut::<TerrainPriority>() {
-        priority.reset();
-    }
     let Some(terrain) = terrain else {
         world.insert_resource(CesiumSourceUpdate(None));
         world.remove_resource::<TerrainStartup>();
@@ -413,7 +419,6 @@ fn update_startup(
 }
 
 #[allow(clippy::type_complexity)]
-#[allow(clippy::too_many_arguments)]
 fn collect_views(
     geo: Res<GeoContext>,
     grid: Res<FloatingOriginSettings>,
@@ -426,101 +431,72 @@ fn collect_views(
             Option<&GridCell>,
             Option<&ChildOf>,
             Option<&SensorCamera>,
-            Option<&crate::ui::inspector::viewport::Viewport>,
-            Has<MainCamera>,
         ),
         Or<(With<MainCamera>, With<SensorCamera>)>,
     >,
     parents: Query<(&Transform, &GridCell)>,
     mut output: ResMut<CesiumViews>,
-    mut priority: Option<ResMut<TerrainPriority>>,
 ) {
-    let nearby = priority.as_ref().is_some_and(|priority| priority.enabled);
-    if let Some(priority) = priority.as_mut() {
-        priority.camera_ready = false;
-    }
     let ecef_from_bevy = GeoFrame::bevy_M_(&GeoFrame::ECEF, &geo).inverse();
-    let mut views: Vec<_> = cameras
+    let views: Vec<_> = cameras
         .iter()
-        .filter_map(
-            |(camera, projection, transform, cell, parent, sensor, viewport, main)| {
-                // Headless scheduling disables sensors between emissions. Their terrain
-                // requirements must survive those gaps and include every sensor.
-                if !camera.is_active && sensor.is_none() {
-                    return None;
-                }
-                if nearby
-                    && main
-                    && !viewport.is_some_and(|viewport| {
-                        viewport.pose_initialized || viewport.pos.eql.trim().is_empty()
-                    })
-                {
-                    return None;
-                }
-                if let Some(configs) = sensor_configs.as_ref()
-                    && let Some(config) =
-                        sensor.and_then(|sensor| configs.0.get(sensor.config_index))
-                    && has_wider_sensor_view(config, &configs.0)
-                {
-                    // Co-located, aligned sensors share the wider view's terrain.
-                    // Independent zoom refinement continuously changes the GPU-ready
-                    // selection during flight and can strand both streams on old tiles.
-                    // This trades zoomed terrain detail for stable preview coverage;
-                    // cameras at different poses still contribute their own views.
-                    return None;
-                }
-                let Projection::Perspective(p) = projection else {
-                    return None;
-                };
-                let size = camera.physical_viewport_size().or_else(|| {
-                    let config = sensor_configs.as_ref()?.0.get(sensor?.config_index)?;
-                    Some(UVec2::new(config.width, config.height))
-                })?;
-                if size.x == 0 || size.y == 0 {
-                    return None;
-                }
-                // Sensor cameras own their grid cell; Editor cameras inherit the
-                // viewport anchor's cell and compose their local transform with it.
-                let (transform, cell) = cell
-                    .map(|cell| (*transform, *cell))
-                    .or_else(|| {
-                        parent
-                            .and_then(|p| parents.get(p.parent()).ok())
-                            .map(|(t, c)| (t.mul_transform(*transform), *c))
-                    })
-                    .unwrap_or((*transform, GridCell::default()));
-                if main && let Some(priority) = priority.as_mut() {
-                    priority.camera_ready = true;
-                }
-                Some((
-                    main,
-                    CesiumView {
-                        position: camera_position_ecef(ecef_from_bevy, &grid, &cell, &transform)
-                            .to_array(),
-                        direction: ecef_from_bevy
-                            .transform_vector3(transform.forward().as_dvec3())
-                            .normalize()
-                            .to_array(),
-                        up: ecef_from_bevy
-                            .transform_vector3(transform.up().as_dvec3())
-                            .normalize()
-                            .to_array(),
-                        width: f64::from(size.x),
-                        height: f64::from(size.y),
-                        vertical_fov: f64::from(p.fov),
-                        horizontal_fov: 2.0
-                            * ((f64::from(p.fov) * 0.5).tan() * f64::from(size.x)
-                                / f64::from(size.y))
-                            .atan(),
-                    },
-                ))
-            },
-        )
+        .filter_map(|(camera, projection, transform, cell, parent, sensor)| {
+            // Headless scheduling disables sensors between emissions. Their terrain
+            // requirements must survive those gaps and include every sensor.
+            if !camera.is_active && sensor.is_none() {
+                return None;
+            }
+            if let Some(configs) = sensor_configs.as_ref()
+                && let Some(config) = sensor.and_then(|sensor| configs.0.get(sensor.config_index))
+                && has_wider_sensor_view(config, &configs.0)
+            {
+                // Co-located, aligned sensors share the wider view's terrain.
+                // Independent zoom refinement continuously changes the GPU-ready
+                // selection during flight and can strand both streams on old tiles.
+                // This trades zoomed terrain detail for stable preview coverage;
+                // cameras at different poses still contribute their own views.
+                return None;
+            }
+            let Projection::Perspective(p) = projection else {
+                return None;
+            };
+            let size = camera.physical_viewport_size().or_else(|| {
+                let config = sensor_configs.as_ref()?.0.get(sensor?.config_index)?;
+                Some(UVec2::new(config.width, config.height))
+            })?;
+            if size.x == 0 || size.y == 0 {
+                return None;
+            }
+            // Sensor cameras own their grid cell; Editor cameras inherit the
+            // viewport anchor's cell and compose their local transform with it.
+            let (transform, cell) = cell
+                .map(|cell| (*transform, *cell))
+                .or_else(|| {
+                    parent
+                        .and_then(|p| parents.get(p.parent()).ok())
+                        .map(|(t, c)| (t.mul_transform(*transform), *c))
+                })
+                .unwrap_or((*transform, GridCell::default()));
+            Some(CesiumView {
+                position: camera_position_ecef(ecef_from_bevy, &grid, &cell, &transform).to_array(),
+                direction: ecef_from_bevy
+                    .transform_vector3(transform.forward().as_dvec3())
+                    .normalize()
+                    .to_array(),
+                up: ecef_from_bevy
+                    .transform_vector3(transform.up().as_dvec3())
+                    .normalize()
+                    .to_array(),
+                width: f64::from(size.x),
+                height: f64::from(size.y),
+                vertical_fov: f64::from(p.fov),
+                horizontal_fov: 2.0
+                    * ((f64::from(p.fov) * 0.5).tan() * f64::from(size.x) / f64::from(size.y))
+                        .atan(),
+            })
+        })
         .collect();
-    if nearby {
-        views.sort_by_key(|(main, _)| !main);
-    }
-    output.0 = views.into_iter().map(|(_, view)| view).collect();
+    output.0 = views;
 }
 
 fn has_wider_sensor_view(config: &SensorCameraConfig, configs: &[SensorCameraConfig]) -> bool {
@@ -701,7 +677,7 @@ mod coordinate_tests {
     }
 
     #[test]
-    fn prepared_terrain_holds_simulation_even_when_gate_metadata_arrives_late() {
+    fn gate_metadata_releases_simulation_without_waiting_for_terrain() {
         for gate_present_initially in [false, true] {
             let (packet_tx, _packet_rx, outgoing, _incoming) = impeller_bevy::channels::channels();
             let mut config = impeller_wkt::DbConfig::default();
@@ -733,7 +709,11 @@ mod coordinate_tests {
                 );
             app.update();
             assert_eq!(playback_ready(app.world()), !gate_present_initially);
-            assert!(outgoing.try_recv().is_err());
+            if gate_present_initially {
+                assert!(matches!(outgoing.try_recv(), Ok(Some(_))));
+            } else {
+                assert!(outgoing.try_recv().is_err());
+            }
 
             // The schematic and endpoint stay unchanged when the DB config arrives.
             app.world_mut()
@@ -746,8 +726,8 @@ mod coordinate_tests {
             app.world_mut().remove_resource::<CesiumSourceUpdate>();
             app.update();
             assert!(
-                outgoing.try_recv().is_err(),
-                "simulation released before terrain loaded"
+                matches!(outgoing.try_recv(), Ok(Some(_))),
+                "simulation stayed held until terrain loaded"
             );
             assert!(!playback_ready(app.world()));
             assert!(
@@ -815,10 +795,7 @@ mod coordinate_tests {
         ))
         .add_systems(Update, configure_terrain);
         for mode in [None, Some(TerrainMode::Offline), Some(TerrainMode::Hybrid)] {
-            app.insert_resource(TerrainPlayback {
-                mode,
-                basemap: None,
-            });
+            app.insert_resource(TerrainPlayback { mode });
             app.update();
             let Some(CesiumSource::Prepared {
                 ion_access_token, ..
@@ -839,7 +816,6 @@ mod coordinate_tests {
         let mut app = App::new();
         app.insert_resource(TerrainPlayback {
             mode: Some(TerrainMode::Offline),
-            basemap: None,
         })
         .insert_resource(crate::ui::schematic::CurrentSchematic(
             impeller_wkt::Schematic {
@@ -897,7 +873,7 @@ mod coordinate_tests {
     }
 
     #[test]
-    fn terrain_failure_releases_held_simulation() {
+    fn held_simulation_releases_before_terrain_failure() {
         let (packet_tx, _packet_rx, outgoing, _incoming) = impeller_bevy::channels::channels();
         let mut config = impeller_wkt::DbConfig::default();
         config.metadata.insert(
@@ -911,7 +887,8 @@ mod coordinate_tests {
             .insert_resource(packet_tx)
             .add_systems(Update, release_simulation);
         app.update();
-        assert!(outgoing.try_recv().is_err());
+        assert!(matches!(outgoing.try_recv(), Ok(Some(_))));
+        assert_eq!(app.world().resource::<TerrainStartup>().result(), Ok(false));
 
         app.world_mut()
             .resource_mut::<TerrainStartup>()
@@ -920,7 +897,7 @@ mod coordinate_tests {
                 ..default()
             });
         app.update();
-        assert!(matches!(outgoing.try_recv(), Ok(Some(_))));
+        assert!(app.world().resource::<TerrainStartup>().result().is_err());
     }
 
     #[test]
@@ -1018,6 +995,43 @@ mod coordinate_tests {
             capture_ready(&world),
             Err("Terrain capture warm-up timed out")
         );
+
+        let mut unconfigured = World::new();
+        unconfigured.insert_resource(TerrainCapture {
+            started: web_time::Instant::now() - std::time::Duration::from_secs(1_000),
+            timeout: std::time::Duration::from_secs(1),
+        });
+        assert_eq!(capture_ready(&unconfigured), Ok(true));
+
+        let mut missed = World::new();
+        missed.insert_resource(TerrainStartup::waiting());
+        missed.insert_resource(TerrainCapture {
+            started: web_time::Instant::now(),
+            timeout: std::time::Duration::ZERO,
+        });
+        missed.insert_resource(CesiumStatus {
+            visible_tiles: 2,
+            load_failed: true,
+            error: Some("HTTP request failed"),
+            ..default()
+        });
+        assert_eq!(capture_ready(&missed), Ok(true));
+
+        world
+            .resource_mut::<TerrainStartup>()
+            .update(&CesiumStatus {
+                visible_tiles: 2,
+                load_failed: true,
+                error: Some("HTTP request failed"),
+                ..default()
+            });
+        world.insert_resource(CesiumStatus {
+            visible_tiles: 2,
+            load_failed: true,
+            error: Some("HTTP request failed"),
+            ..default()
+        });
+        assert_eq!(capture_ready(&world), Ok(true));
     }
 
     #[test]
@@ -1053,7 +1067,7 @@ mod coordinate_tests {
         assert!(app.world().resource::<TerrainStartup>().owns_surface());
         assert!(playback_ready(app.world()));
         assert!(!app.world().contains_resource::<CesiumSourceUpdate>());
-        assert_eq!(capture_ready(app.world()), Err("HTTP request failed"));
+        assert_eq!(capture_ready(app.world()), Ok(true));
         // Looking away or swapping LODs must not relinquish the surface.
         app.world_mut().resource_mut::<CesiumStatus>().visible_tiles = 0;
         app.update();
@@ -1082,78 +1096,6 @@ mod coordinate_tests {
         assert_eq!(startup.result(), Ok(true));
         startup.update(&CesiumStatus::default());
         assert_eq!(startup.result(), Ok(true));
-    }
-
-    #[test]
-    fn nearby_waits_for_a_schematic_pose_and_prefers_the_main_view() {
-        use crate::{object_3d::EditableEQL, ui::inspector::viewport::Viewport};
-        let mut app = App::new();
-        app.insert_resource(GeoContext::from(GeoOrigin::new_from_degrees(
-            35., -117., 500.,
-        )))
-        .insert_resource(FloatingOriginSettings::new(2000., 100.))
-        .insert_resource(TerrainPriority::nearby())
-        .init_resource::<CesiumViews>()
-        .add_systems(Update, collect_views);
-        let camera = Camera {
-            viewport: Some(bevy::camera::Viewport {
-                physical_size: UVec2::new(640, 480),
-                ..default()
-            }),
-            ..default()
-        };
-        app.world_mut().spawn((
-            camera.clone(),
-            Projection::Perspective(default()),
-            Transform::from_xyz(0., 100., 0.),
-            GridCell::default(),
-            SensorCamera { config_index: 0 },
-        ));
-        let viewport = Viewport::new(
-            Entity::PLACEHOLDER,
-            EditableEQL {
-                eql: "vehicle.world_pos".into(),
-                compiled_expr: None,
-            },
-            EditableEQL::default(),
-            EditableEQL::default(),
-            None,
-            0.,
-        );
-        let main = app
-            .world_mut()
-            .spawn((
-                camera,
-                Projection::Perspective(default()),
-                Transform::IDENTITY,
-                MainCamera,
-            ))
-            .id();
-        app.update();
-        assert!(
-            !app.world().resource::<TerrainPriority>().camera_ready,
-            "the temporary main camera must not establish the nearby origin"
-        );
-        app.world_mut().entity_mut(main).insert(viewport);
-        app.update();
-        assert!(!app.world().resource::<TerrainPriority>().camera_ready);
-        app.world_mut()
-            .get_mut::<Viewport>(main)
-            .unwrap()
-            .pose_initialized = true;
-        app.update();
-        assert!(app.world().resource::<TerrainPriority>().camera_ready);
-        let views = &app.world().resource::<CesiumViews>().0;
-        assert_eq!(views.len(), 2);
-        assert_ne!(views[0].position, views[1].position);
-        let first = views[0].position;
-        app.world_mut().entity_mut(main).remove::<MainCamera>();
-        app.update();
-        assert_ne!(
-            app.world().resource::<CesiumViews>().0[0].position,
-            first,
-            "the first published view before removal belonged to the main camera"
-        );
     }
 
     #[test]

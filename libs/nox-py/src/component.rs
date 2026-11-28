@@ -68,17 +68,88 @@ impl PyComponent {
     }
 }
 
+/// When a component's values reach the DB, counted in commits.
+#[pyclass(frozen)]
+#[derive(Clone)]
+pub struct Recording(String);
+
+#[pymethods]
+impl Recording {
+    /// When its bytes differ from the last recorded value; the default.
+    #[staticmethod]
+    fn on_change() -> Self {
+        Self("on_change".into())
+    }
+
+    /// At every commit, changed or not.
+    #[staticmethod]
+    fn every_commit() -> Self {
+        Self("every_commit".into())
+    }
+
+    /// At every `n`th commit, changed or not.
+    #[staticmethod]
+    fn every(n: u64) -> PyResult<Self> {
+        if n == 0 {
+            return Err(PyValueError::new_err("n must be at least 1"));
+        }
+        Ok(Self(format!("every:{n}")))
+    }
+
+    /// At the commits a `pre_commit` callback asks for with `WorldStepContext.record`.
+    #[staticmethod]
+    fn manual() -> Self {
+        Self("manual".into())
+    }
+
+    /// Once, when the run starts.
+    #[staticmethod]
+    fn initial_only() -> Self {
+        Self("initial_only".into())
+    }
+
+    /// Never: the component stays out of the DB, its history, replication and the editor.
+    #[staticmethod]
+    fn transient() -> Self {
+        Self("transient".into())
+    }
+
+    fn __repr__(&self) -> String {
+        format!("Recording({:?})", self.0)
+    }
+}
+
+/// Sets `key` to `value`, unless `metadata` already gives it another value.
+fn set_policy(
+    name: &str,
+    metadata: &mut HashMap<String, String>,
+    key: &str,
+    value: &str,
+) -> Result<(), Error> {
+    match metadata.get(key) {
+        Some(given) if given != value => Err(PyValueError::new_err(format!(
+            "component {name:?}: metadata {key}={given:?} conflicts with its recording"
+        ))
+        .into()),
+        _ => {
+            metadata.insert(key.to_string(), value.to_string());
+            Ok(())
+        }
+    }
+}
+
 #[pymethods]
 impl PyComponent {
     #[new]
-    #[pyo3(signature = (name, ty = None, metadata = HashMap::default()))]
+    #[pyo3(signature = (name, ty = None, metadata = HashMap::default(), recording = None))]
     pub fn new(
         py: Python<'_>,
         name: String,
         ty: Option<ComponentType>,
         metadata: HashMap<String, PyObject>,
+        recording: Option<Recording>,
     ) -> Result<Self, Error> {
-        let metadata = metadata
+        let mut metadata = metadata
             .into_iter()
             .map(|(k, v)| {
                 let value = if let Ok(s) = v.extract::<String>(py) {
@@ -96,6 +167,14 @@ impl PyComponent {
 
         if name.chars().any(char::is_whitespace) {
             return Err(Error::InvalidComponentName(name));
+        }
+        // The legacy keys keep the DB, editor and followers reading the typed settings.
+        if let Some(Recording(recording)) = &recording {
+            set_policy(&name, &mut metadata, "recording", recording)?;
+            let every_commit = (recording == "every_commit").to_string();
+            set_policy(&name, &mut metadata, "record_every_tick", &every_commit)?;
+            let transient = (recording == "transient").to_string();
+            set_policy(&name, &mut metadata, "transient", &transient)?;
         }
 
         Ok(Self { name, ty, metadata })
@@ -441,13 +520,13 @@ mod tests {
 
         pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
-            let err = PyComponent::new(py, "fuel mass".into(), None, HashMap::new())
+            let err = PyComponent::new(py, "fuel mass".into(), None, HashMap::new(), None)
                 .expect_err("whitespace is rejected");
             assert!(
                 err.to_string().contains("whitespace"),
                 "unexpected error: {err}"
             );
-            PyComponent::new(py, "fuel_mass".into(), None, HashMap::new())
+            PyComponent::new(py, "fuel_mass".into(), None, HashMap::new(), None)
                 .expect("snake_case names are accepted");
         });
     }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use impeller::types::ComponentId;
 use impeller::types::Timestamp;
@@ -12,6 +12,7 @@ use crate::cranelift_exec::CraneliftWorldExec;
 use crate::error::Error;
 use crate::jax_exec::JaxWorldExec;
 use crate::query::ComponentArray;
+use crate::tick_metrics::Timing;
 use crate::world::World;
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -90,6 +91,25 @@ impl WorldExec {
             Self::Cranelift(e) => &mut e.profiler,
         }
     }
+
+    pub fn backend_report(&self) -> crate::tick_metrics::BackendReport {
+        match self {
+            Self::Jax(e) => e.tick_exec.backend_report(),
+            Self::Cranelift(e) => e.tick_exec.backend_report(),
+        }
+    }
+
+    pub fn metadata(&self) -> &ExecMetadata {
+        match self {
+            Self::Jax(e) => &e.tick_exec.metadata,
+            Self::Cranelift(e) => &e.tick_exec.metadata,
+        }
+    }
+
+    /// Whether the run's timing level compiled probes in, on a backend that has them.
+    pub fn probed(&self) -> bool {
+        matches!(self, Self::Cranelift(_)) && self.world().metadata.timing > Timing::Summary
+    }
 }
 
 // --- Python wrapper ---
@@ -108,13 +128,15 @@ pub struct PyExec {
     start: Timestamp,
     /// Ticks run so far, across `run` calls.
     ticks: u64,
+    last_receipt: Option<crate::tick_metrics::Receipt>,
 }
 
 impl PyExec {
     /// `db` must already hold the world's pairs, as `init_db` leaves it.
     pub fn new(exec: WorldExec, db: elodin_db::DB, start: Timestamp) -> Self {
         let sync = db.with_state(|state| {
-            crate::impeller_server::DbSync::new(state, exec.world(), &Default::default())
+            let written = &exec.metadata().ret_ids;
+            crate::impeller_server::DbSync::new(state, exec.world(), written, &Default::default())
         });
         Self {
             exec,
@@ -122,6 +144,7 @@ impl PyExec {
             sync,
             start,
             ticks: 0,
+            last_receipt: None,
         }
     }
 
@@ -155,8 +178,19 @@ impl PyExec {
                 ProgressStyle::with_template("{bar:50} {pos:>6}/{len:6} remaining: {eta}").unwrap(),
             );
         let configured_batch = self.exec.world().ticks_per_telemetry() as usize;
+        let mut metrics = crate::tick_metrics::TickMetrics::new();
+        metrics.silent = true;
+        metrics.requested_ticks = Some(ticks as u64);
+        metrics.record_cycles(Some(ticks.div_ceil(configured_batch.max(1)) as u64));
+        metrics.backend = Some(self.exec.backend_report());
+        metrics.timing = self.exec.world().metadata.timing;
+        if self.exec.probed() {
+            cranelift_mlir::profile::reset_timings();
+        }
+        self.sync.reset_counters();
         let mut remaining = ticks;
         while remaining > 0 {
+            let cycle_start = Instant::now();
             let this_batch = remaining.min(configured_batch.max(1));
             // Temporarily override so the kernel runs the right number of batched ticks.
             if this_batch != configured_batch {
@@ -166,13 +200,23 @@ impl PyExec {
             if this_batch != configured_batch {
                 self.exec.world_mut().metadata.ticks_per_telemetry = configured_batch as u64;
             }
+            metrics.observe_world_run(cycle_start.elapsed());
             self.ticks += this_batch as u64;
             let commit_timestamp = self.tick_timestamp(self.ticks);
             let vtable_gen = self.db.vtable_gen.latest();
+            let commit_start = Instant::now();
             self.db.with_state(|_| {
-                self.sync
-                    .commit_world(self.exec.world(), commit_timestamp, vtable_gen)
+                self.sync.commit_world(
+                    self.exec.world(),
+                    commit_timestamp,
+                    vtable_gen,
+                    &Default::default(),
+                )
             })?;
+            metrics.observe_commit(commit_start.elapsed());
+            metrics.cycles += 1;
+            metrics.steps += this_batch as u64;
+            metrics.observe_total_cycle(cycle_start.elapsed());
             remaining -= this_batch;
 
             if let Some(func) = &is_canceled {
@@ -181,14 +225,25 @@ impl PyExec {
                 })?;
                 if is_canceled {
                     eprintln!("exec.run canceled!");
-                    return Ok(());
+                    break;
                 }
             }
             py.check_signals()?;
             progress_bar.inc(this_batch as u64);
         }
         progress_bar.finish_and_clear();
+        metrics.sync = Some(self.sync.counters.clone());
+        metrics.systems = self.exec.probed().then(cranelift_mlir::profile::timings);
+        self.last_receipt = Some(metrics.receipt());
         Ok(())
+    }
+
+    /// The receipt of the latest `run`, or `None` before the first.
+    pub fn last_receipt<'py>(&self, py: Python<'py>) -> PyResult<Option<Bound<'py, PyAny>>> {
+        self.last_receipt
+            .as_ref()
+            .map(|receipt| receipt.to_py(py))
+            .transpose()
     }
 
     pub fn profile(&self) -> HashMap<&'static str, f64> {

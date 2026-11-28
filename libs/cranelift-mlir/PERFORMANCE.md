@@ -32,6 +32,12 @@ banner.
 The probes roughly double tick time on call-heavy models, so use this layer to find *where*
 time goes and section 9 to decide whether a change made ticks *faster*.
 
+For per-function times without the debug artifacts, run with
+`timing=el.Timing.systems()` (or `.operations()` for the op-category sampling too). The
+same probes go in, and the run receipt's `systems` section lists each function's calls and
+inclusive and exclusive time, longest first, with the calibrated probe cost; systems appear
+under their names. Nothing is written to stderr or disk.
+
 ---
 
 ## 1. Outputs at a glance

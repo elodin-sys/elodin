@@ -464,6 +464,9 @@ fn try_inline_one_top_level_call(
         }
         None => return false,
     };
+    if return_operands.iter().collect::<HashSet<_>>().len() != return_operands.len() {
+        return false;
+    }
 
     // Skip edge case: a return operand that is also a parameter would
     // require us to introduce a move/copy (arg → call_result), which
@@ -937,6 +940,57 @@ module @module {
         assert_eq!(inline_single_caller_callees(&mut module), 1);
         let main = module.main_func().unwrap();
         assert_eq!(main.duplicate_value_def(), None);
+    }
+
+    #[test]
+    fn does_not_inline_duplicate_return_operands() {
+        let f = FuncDef {
+            name: "f".into(),
+            is_public: false,
+            params: vec![(ValueId(0), ty_f64())],
+            result_types: vec![ty_f64(), ty_f64()],
+            body: vec![
+                mk_constant(1, 1.0),
+                InstrResult {
+                    values: vec![(ValueId(2), ty_f64())],
+                    instr: Instruction::Add {
+                        lhs: ValueId(0),
+                        rhs: ValueId(1),
+                    },
+                },
+                InstrResult {
+                    values: vec![],
+                    instr: Instruction::Return {
+                        operands: vec![ValueId(2), ValueId(2)],
+                    },
+                },
+            ],
+            source_line: None,
+        };
+        let main = FuncDef {
+            name: "main".into(),
+            is_public: true,
+            params: vec![(ValueId(100), ty_f64())],
+            result_types: vec![ty_f64(), ty_f64()],
+            body: vec![
+                InstrResult {
+                    values: vec![(ValueId(200), ty_f64()), (ValueId(201), ty_f64())],
+                    instr: Instruction::Call {
+                        callee: "f".into(),
+                        args: vec![ValueId(100)],
+                    },
+                },
+                InstrResult {
+                    values: vec![],
+                    instr: Instruction::Return {
+                        operands: vec![ValueId(200), ValueId(201)],
+                    },
+                },
+            ],
+            source_line: None,
+        };
+        let mut module = Module::new(vec![f, main]);
+        assert_eq!(inline_single_caller_callees(&mut module), 0);
     }
 
     #[test]

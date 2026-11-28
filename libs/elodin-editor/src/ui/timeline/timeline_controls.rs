@@ -424,7 +424,8 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                     );
                 });
             });
-        if tick.0 != tick_before_controls {
+        // Browser reads follow the playhead; native reads follow the plot window.
+        if cfg!(target_family = "wasm") && tick.0 != tick_before_controls {
             impeller_bevy::cancel_queued_series_requests(world);
         }
     }

@@ -2177,6 +2177,149 @@ mod tests {
         Ok((src_addr, src_db, fol_addr, fol_db))
     }
 
+    #[test]
+    async fn test_follow_equal_timestamps_in_backfill_and_later_iterations() {
+        let (_, source, _, follower) = setup_follow_pair(1500).await.unwrap();
+        let id = impeller::types::msg_id("equal_follow_timestamps");
+        source.push_msg(Timestamp(100), id, b"A").unwrap();
+        source.push_msg(Timestamp(100), id, b"B").unwrap();
+        assert!(wait_for_msg_count(&follower, id, 2, Duration::from_secs(5)).await);
+        // Arrival after the source has advanced its cursor, including identical bytes.
+        source.push_msg(Timestamp(100), id, b"B").unwrap();
+        assert!(wait_for_msg_count(&follower, id, 3, Duration::from_secs(5)).await);
+        follower.with_state_mut(|state| {
+            let log = state.get_or_insert_msg_log(id, &follower.path).unwrap();
+            assert_eq!(log.timestamps(), &[Timestamp(100); 3]);
+            assert_eq!(log.get_index(0).unwrap().1.as_ref(), b"A");
+            assert_eq!(log.get_index(1).unwrap().1.as_ref(), b"B");
+            assert_eq!(log.get_index(2).unwrap().1.as_ref(), b"B");
+        });
+    }
+
+    #[test]
+    async fn test_follow_legacy_request_remains_timestamped() {
+        let (address, source) = setup_test_db().await.unwrap();
+        let id = impeller::types::msg_id("legacy_follow");
+        source.push_msg(Timestamp(100), id, b"A").unwrap();
+        source.push_msg(Timestamp(100), id, b"B").unwrap();
+        let mut client = Client::connect(address).await.unwrap();
+        client
+            .send(&FollowStream {
+                target_packet_size: 1500,
+            })
+            .await
+            .0
+            .unwrap();
+        for expected in [b"A", b"B"] {
+            let packet = futures_lite::future::race(client.rx.next_grow(vec![0; 128]), async {
+                sleep(Duration::from_secs(5)).await;
+                panic!("legacy follow request did not stream messages");
+            })
+            .await
+            .unwrap();
+            let impeller::types::OwnedPacket::Msg(message) = packet else {
+                panic!("expected a legacy timestamped message");
+            };
+            assert_eq!(message.id, id);
+            assert_eq!(message.timestamp, Some(Timestamp(100)));
+            assert_eq!(&*message.buf, expected);
+        }
+    }
+
+    #[test]
+    async fn test_follow_reopen_equal_occurrences_and_source_truncation() {
+        use stellarator::{
+            struc_con::{Joinable, ThreadBuilder},
+            util::CancelToken,
+        };
+        let (address, source) = setup_test_db().await.unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("follower");
+        let follower = Arc::new(DB::create(path.clone()).unwrap());
+        let id = impeller::types::msg_id("repeated_occurrences");
+        for _ in 0..600 {
+            source.push_msg(Timestamp(100), id, b"same").unwrap();
+        }
+        let start = |db: Arc<DB>, cancel: CancelToken| {
+            ThreadBuilder::default()
+                .cancel_token(cancel)
+                .stellar(move || {
+                    elodin_db::follow::run_follower(
+                        elodin_db::follow::FollowConfig {
+                            source_addr: address,
+                            reconnect_delay: Duration::from_millis(100),
+                            ..Default::default()
+                        },
+                        db,
+                    )
+                })
+        };
+        let cancel = CancelToken::default();
+        let task = start(follower.clone(), cancel.clone());
+        assert!(wait_for_msg_count(&follower, id, 600, Duration::from_secs(5)).await);
+        cancel.cancel();
+        assert!(task.join().await.unwrap().is_none());
+        follower.flush_all().unwrap();
+        drop(follower);
+
+        source.push_msg(Timestamp(100), id, b"same").unwrap();
+        source.push_msg(Timestamp(100), id, b"different").unwrap();
+        let follower = Arc::new(DB::open(path).unwrap());
+        let task = start(follower.clone(), CancelToken::default());
+        assert!(wait_for_msg_count(&follower, id, 602, Duration::from_secs(5)).await);
+        follower.with_state_mut(|state| {
+            let log = state.get_or_insert_msg_log(id, &follower.path).unwrap();
+            assert_eq!(log.timestamps(), &[Timestamp(100); 602]);
+            for index in 0..601 {
+                assert_eq!(log.get_index(index).unwrap().1.as_ref(), b"same");
+            }
+            assert_eq!(log.get_index(601).unwrap().1.as_ref(), b"different");
+        });
+
+        // An identical prefix after truncation is a different source history.
+        source.truncate_msg_log(id).unwrap();
+        for _ in 0..602 {
+            source.push_msg(Timestamp(100), id, b"same").unwrap();
+        }
+        let result = futures_lite::future::race(task.join(), async {
+            sleep(Duration::from_secs(5)).await;
+            panic!("follower did not report the truncated source");
+        })
+        .await
+        .unwrap();
+        assert!(
+            matches!(result, Some(Err(Error::FollowHistoryChanged { id: found })) if found == id)
+        );
+        assert_eq!(
+            follower.with_state_mut(|s| s
+                .get_or_insert_msg_log(id, &follower.path)
+                .unwrap()
+                .timestamps()
+                .len()),
+            602
+        );
+    }
+
+    #[test]
+    async fn test_follow_large_message_and_subsequent_message() {
+        let (_, source, _, follower) = setup_follow_pair(1500).await.unwrap();
+        let id = impeller::types::msg_id("large_follow_message");
+        let payload = vec![0xa5; 32 * 1024 * 1024];
+        source.push_msg(Timestamp(100), id, &payload).unwrap();
+        source
+            .push_msg(Timestamp(101), id, b"after large frame")
+            .unwrap();
+        assert!(wait_for_msg_count(&follower, id, 2, Duration::from_secs(30)).await);
+        follower.with_state_mut(|state| {
+            let log = state.get_or_insert_msg_log(id, &follower.path).unwrap();
+            assert!(
+                log.get_index(0).unwrap().1.as_ref() == payload.as_slice(),
+                "large replicated payload differs from the source"
+            );
+            assert_eq!(log.get_index(1).unwrap().1.as_ref(), b"after large frame");
+        });
+    }
+
     /// Helper: register a VTable and send typed component samples over an
     /// existing client connection.  No per-sample sleeps -- only a short
     /// delay after VTable registration.

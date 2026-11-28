@@ -1,4 +1,4 @@
-// Lowering helpers thread the Cranelift FunctionBuilder, JITModule,
+// Lowering helpers thread the Cranelift FunctionBuilder, Module,
 // IR Module, symbol tables (libm/tensor-rt ids, func_ids, func_abis),
 // value/type maps, and the slot pool by hand. Bundling these into a
 // LoweringContext struct is future work; see ARCHITECTURE.md.
@@ -6,6 +6,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::sync::Arc;
 
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
@@ -19,6 +20,7 @@ use cranelift_codegen::settings::{self, Configurable};
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{ArenaMemoryProvider, JITBuilder, JITModule};
 use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
+use cranelift_object::{ObjectBuilder, ObjectModule};
 
 use crate::ir::*;
 use crate::tensor_rt;
@@ -91,6 +93,10 @@ pub struct CompileConfig {
     /// tensors that would otherwise be classified scalar-ABI.
     /// Always `false` in production configs (including `from_env`).
     pub force_pointer_abi_main: bool,
+    /// Threads that run groups of independent calls, the caller included. Above 1, calls that
+    /// do not depend on each other in a pointer-ABI function run on [`crate::pool`]; profiling
+    /// keeps them serial.
+    pub workers: usize,
 }
 
 impl CompileConfig {
@@ -103,6 +109,7 @@ impl CompileConfig {
             profile_enabled: debug,
             profile_op_times: debug,
             force_pointer_abi_main: false,
+            workers: 1,
         }
     }
 }
@@ -927,7 +934,7 @@ struct LibmIds {
 }
 
 fn declare_libm_functions(
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     call_conv: CallConv,
 ) -> Result<LibmIds, String> {
     let mut mk = |name: &str, n_params: usize, n_rets: usize| -> Result<FuncId, String> {
@@ -1027,7 +1034,7 @@ thread_local! {
 /// is disabled.
 fn emit_op_begin(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     category: crate::op_sampler::OpCategory,
 ) {
     let Some(ids) = with_current_profile_ids(|ids| ids) else {
@@ -1039,7 +1046,7 @@ fn emit_op_begin(
 }
 
 /// Emit a `__cranelift_op_end()` call.
-fn emit_op_end(builder: &mut FunctionBuilder, jit_module: &mut JITModule) {
+fn emit_op_end(builder: &mut FunctionBuilder, jit_module: &mut dyn Module) {
     let Some(ids) = with_current_profile_ids(|ids| ids) else {
         return;
     };
@@ -1056,7 +1063,7 @@ fn emit_op_end(builder: &mut FunctionBuilder, jit_module: &mut JITModule) {
 /// emission count.
 fn bracket_sampled_inner<R>(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     category: crate::op_sampler::OpCategory,
     f: impl FnOnce(&mut FunctionBuilder) -> R,
 ) -> R {
@@ -1087,11 +1094,11 @@ fn set_current_profile_ids(ids: Option<ProfileIds>) {
 }
 
 fn declare_profile_functions(
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     call_conv: CallConv,
 ) -> Result<ProfileIds, String> {
     // Helper to declare a signature with N i32 params and M i64 params.
-    let mk_sig = |jit: &mut JITModule,
+    let mk_sig = |jit: &mut dyn Module,
                   name: &str,
                   i32_params: u32,
                   i64_params: u32|
@@ -1149,7 +1156,7 @@ fn declare_profile_functions(
 /// when profiling is disabled.
 fn emit_marshal_begin(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     direction: u32,
     bytes: u64,
 ) {
@@ -1164,7 +1171,7 @@ fn emit_marshal_begin(
 
 /// Emit a `__cranelift_marshal_end()` call at the builder's current
 /// position. Must be paired with a prior `emit_marshal_begin`.
-fn emit_marshal_end(builder: &mut FunctionBuilder, jit_module: &mut JITModule) {
+fn emit_marshal_end(builder: &mut FunctionBuilder, jit_module: &mut dyn Module) {
     let Some(ids) = with_current_profile_ids(|ids| ids) else {
         return;
     };
@@ -1176,7 +1183,7 @@ fn emit_marshal_end(builder: &mut FunctionBuilder, jit_module: &mut JITModule) {
 /// current position. `mode`: 0 = scalar libm fallback (f64 → libm →
 /// f64 per element), 1 = wide-SIMD batch (f64x2 chunks via the
 /// `wide` crate).
-fn emit_xcend_begin(builder: &mut FunctionBuilder, jit_module: &mut JITModule, mode: u32) {
+fn emit_xcend_begin(builder: &mut FunctionBuilder, jit_module: &mut dyn Module, mode: u32) {
     let Some(ids) = with_current_profile_ids(|ids| ids) else {
         return;
     };
@@ -1187,7 +1194,7 @@ fn emit_xcend_begin(builder: &mut FunctionBuilder, jit_module: &mut JITModule, m
 
 /// Emit a `__cranelift_xcend_end()` call at the builder's current
 /// position. Must be paired with a prior `emit_xcend_begin`.
-fn emit_xcend_end(builder: &mut FunctionBuilder, jit_module: &mut JITModule) {
+fn emit_xcend_end(builder: &mut FunctionBuilder, jit_module: &mut dyn Module) {
     let Some(ids) = with_current_profile_ids(|ids| ids) else {
         return;
     };
@@ -1198,7 +1205,7 @@ fn emit_xcend_end(builder: &mut FunctionBuilder, jit_module: &mut JITModule) {
 /// Emit a `__cranelift_call_begin()` call at the builder's current
 /// position. Brackets every emitted `call` op so the profile can
 /// split per-function "time in callees" from inline IR.
-fn emit_call_begin(builder: &mut FunctionBuilder, jit_module: &mut JITModule) {
+fn emit_call_begin(builder: &mut FunctionBuilder, jit_module: &mut dyn Module) {
     let Some(ids) = with_current_profile_ids(|ids| ids) else {
         return;
     };
@@ -1208,7 +1215,7 @@ fn emit_call_begin(builder: &mut FunctionBuilder, jit_module: &mut JITModule) {
 
 /// Emit a `__cranelift_call_end()` call at the builder's current
 /// position.
-fn emit_call_end(builder: &mut FunctionBuilder, jit_module: &mut JITModule) {
+fn emit_call_end(builder: &mut FunctionBuilder, jit_module: &mut dyn Module) {
     let Some(ids) = with_current_profile_ids(|ids| ids) else {
         return;
     };
@@ -1219,7 +1226,7 @@ fn emit_call_end(builder: &mut FunctionBuilder, jit_module: &mut JITModule) {
 /// Emit a `__cranelift_loop_iter(loop_id)` call at the builder's
 /// current position. Called at the top of each `while` body so the
 /// profiler can count dynamic loop iterations.
-fn emit_loop_iter(builder: &mut FunctionBuilder, jit_module: &mut JITModule, loop_id: u32) {
+fn emit_loop_iter(builder: &mut FunctionBuilder, jit_module: &mut dyn Module, loop_id: u32) {
     let Some(ids) = with_current_profile_ids(|ids| ids) else {
         return;
     };
@@ -1287,7 +1294,7 @@ fn leak_static_str(s: &str) -> &'static str {
 /// profiler uses to key its per-function stats map.
 fn inject_profile_probes(
     func: &mut cranelift_codegen::ir::Function,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     profile_ids: &ProfileIds,
     fid: FuncId,
 ) {
@@ -1341,15 +1348,15 @@ macro_rules! define_trt {
     ($( $field:ident, $symbol:expr, $fn_path:path, [ $($param:expr),* ];)*) => {
         struct TensorRtIds { $($field: FuncId,)* }
 
-        fn register_tensor_rt_symbols(jit_builder: &mut JITBuilder) {
-            $(jit_builder.symbol($symbol, $fn_path as *const u8);)*
+        fn tensor_rt_symbols() -> Vec<(&'static str, *const u8)> {
+            vec![$(($symbol, $fn_path as *const u8),)*]
         }
 
         fn declare_tensor_rt_functions(
-            jit_module: &mut JITModule,
+            jit_module: &mut dyn Module,
             call_conv: CallConv,
         ) -> Result<TensorRtIds, String> {
-            fn decl(m: &mut JITModule, cc: CallConv, name: &str, params: &[Type]) -> Result<FuncId, String> {
+            fn decl(m: &mut dyn Module, cc: CallConv, name: &str, params: &[Type]) -> Result<FuncId, String> {
                 let mut sig = m.make_signature();
                 sig.call_conv = cc;
                 for &t in params { sig.params.push(AbiParam::new(t)); }
@@ -1507,6 +1514,8 @@ define_trt! {
     sort, "__trt_sort", tensor_rt::tensor_sort, [ptr_type(), ptr_type()];
     // memory
     memcpy, "__trt_memcpy", tensor_rt::tensor_memcpy, [ptr_type(), ptr_type(), types::I64];
+    // fn(estimate, tasks, n): runs a group of independent calls
+    parallel, "__elodin_parallel", crate::pool::run, [ptr_type(), ptr_type(), types::I64];
     // layout / shape
     transpose_f64,    "__trt_transpose_f64",    tensor_rt::tensor_transpose_f64,    [ptr_type(), ptr_type(), types::I64, types::I64];
     // (transpose_nd, broadcast_nd, slice -- replaced by generic variants below)
@@ -1554,174 +1563,28 @@ pub fn compile_module_with_config(
     ir_module: &crate::ir::Module,
     config: CompileConfig,
 ) -> Result<CompiledModule, String> {
-    reset_instr_counts();
-    // Defensive clear: a prior compile that errored partway through
-    // Phase 1 may have left `(FuncId, Context)` entries behind on this
-    // thread. Those FuncIds belong to a now-dead JITModule, so carrying
-    // them into the next compile's Phase 2 would corrupt symbol
-    // resolution. Start every compile with an empty buffer.
-    let _ = drain_pending_functions();
+    let (ir_module, parallel_groups) = prepare_module(ir_module, &config);
+    let ir_module = &ir_module;
+    if config.workers > 1 && !config.profile_enabled {
+        crate::pool::ensure_workers(config.workers - 1);
+    }
 
-    // Single-caller inliner. Runs once per compile, at the IR level
-    // before any Cranelift codegen. Replaces `Instruction::Call`
-    // sites whose callee has exactly one caller and a small body
-    // with the inlined body, eliminating the call overhead. Clone
-    // the module because the public API takes `&Module`; one extra
-    // Vec clone is negligible next to Cranelift codegen.
-    let ir_module_storage;
-    let ir_module = {
-        let mut mut_module = ir_module.clone();
-        let changed = crate::inliner::inline_tiny_callees(&mut mut_module, |f| {
-            classify_function(f) == FuncAbi::Scalar
-        });
-        crate::const_fold::refold(&mut mut_module, &changed);
-        let inlined = crate::inliner::inline_single_caller_callees(&mut mut_module);
-        if inlined > 0 && crate::debug::enabled() {
-            eprintln!(
-                "[elodin-cranelift] inliner: inlined {} single-caller callee(s)",
-                inlined
-            );
-        }
-        ir_module_storage = mut_module;
-        &ir_module_storage
-    };
-
-    let mut flag_builder = settings::builder();
-    flag_builder.set("opt_level", "speed").unwrap();
-    flag_builder.set("is_pic", "false").unwrap();
-    let isa_builder = cranelift_native::builder().map_err(|e| format!("native ISA: {e}"))?;
-    let isa = isa_builder
-        .finish(settings::Flags::new(flag_builder))
-        .map_err(|e| format!("ISA finish: {e}"))?;
-
-    let call_conv = isa.default_call_conv();
-    let mut jit_builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+    let mut jit_builder = JITBuilder::with_isa(
+        build_isa(false, "native")?,
+        cranelift_module::default_libcall_names(),
+    );
 
     const JIT_ARENA_SIZE: usize = 2 * 1024 * 1024 * 1024;
     let arena = ArenaMemoryProvider::new_with_size(JIT_ARENA_SIZE)
         .map_err(|e| format!("JIT arena allocation: {e}"))?;
     jit_builder.memory_provider(Box::new(arena));
 
-    jit_builder.symbol("sin", libc_sin as *const u8);
-    jit_builder.symbol("cos", libc_cos as *const u8);
-    jit_builder.symbol("atan2", libc_atan2 as *const u8);
-    jit_builder.symbol("sqrt", libc_sqrt as *const u8);
-    jit_builder.symbol("fabs", libc_fabs as *const u8);
-    jit_builder.symbol("fmod", libc_fmod as *const u8);
-    jit_builder.symbol("acos", libc_acos as *const u8);
-    jit_builder.symbol("log", libc_log as *const u8);
-    jit_builder.symbol("exp", libc_exp as *const u8);
-    jit_builder.symbol("pow", libc_pow as *const u8);
-    jit_builder.symbol("tanh", libc_tanh as *const u8);
-    jit_builder.symbol("tan", libc_tan as *const u8);
-    jit_builder.symbol("erf_inv_impl", erf_inv_scalar as *const u8);
-    jit_builder.symbol("log1p_impl", libc_log1p as *const u8);
-    jit_builder.symbol("asin_impl", libc_asin as *const u8);
-    jit_builder.symbol("atan_impl", libc_atan as *const u8);
-    jit_builder.symbol("sinh_impl", libc_sinh as *const u8);
-    jit_builder.symbol("cosh_impl", libc_cosh as *const u8);
-    jit_builder.symbol("erfc_impl_scalar", libc_erfc as *const u8);
-    jit_builder.symbol("expm1_impl", libc_expm1 as *const u8);
-    jit_builder.symbol("cbrt_impl", libc_cbrt as *const u8);
-    jit_builder.symbol("__cranelift_svd", cranelift_svd as *const u8);
-    jit_builder.symbol("__cranelift_lu", cranelift_lu as *const u8);
-    jit_builder.symbol("__cranelift_trsm", cranelift_trsm as *const u8);
-    jit_builder.symbol("__cranelift_cholesky", cranelift_cholesky as *const u8);
-    jit_builder.symbol("__cranelift_qr", cranelift_qr as *const u8);
-    jit_builder.symbol("__cranelift_orgqr", cranelift_orgqr as *const u8);
-    jit_builder.symbol("__cranelift_syevd", cranelift_syevd as *const u8);
-    jit_builder.symbol("__cranelift_gesv", cranelift_gesv as *const u8);
-    jit_builder.symbol("__cranelift_potrs", cranelift_potrs as *const u8);
-    jit_builder.symbol("__cranelift_gelsd", cranelift_gelsd as *const u8);
-    jit_builder.symbol("__cranelift_geev", cranelift_geev as *const u8);
-    jit_builder.symbol("__cranelift_gesvd", cranelift_gesvd as *const u8);
-    jit_builder.symbol(
-        "__trt_batch_norm_inference_f64",
-        crate::tensor_rt::tensor_batch_norm_inference_f64 as *const u8,
-    );
-    jit_builder.symbol(
-        "__trt_real_dynamic_slice",
-        crate::tensor_rt::tensor_real_dynamic_slice as *const u8,
-    );
-    jit_builder.symbol(
-        "__trt_map_f64",
-        crate::tensor_rt::tensor_map_f64 as *const u8,
-    );
-    {
-        use crate::tensor_rt::{tensor_reduce_window as rw, tensor_select_and_scatter as sas};
-        for (symbol, kernel) in [
-            ("__trt_reduce_window_f64", rw::<f64> as *const u8),
-            ("__trt_reduce_window_f32", rw::<f32> as *const u8),
-            ("__trt_reduce_window_i64", rw::<i64> as *const u8),
-            ("__trt_reduce_window_i32", rw::<i32> as *const u8),
-            ("__trt_select_and_scatter_f64", sas::<f64> as *const u8),
-            ("__trt_select_and_scatter_f32", sas::<f32> as *const u8),
-            ("__trt_select_and_scatter_i64", sas::<i64> as *const u8),
-            ("__trt_select_and_scatter_i32", sas::<i32> as *const u8),
-        ] {
-            jit_builder.symbol(symbol, kernel);
-        }
-    }
-    jit_builder.symbol(
-        "__trt_conv_f64",
-        crate::tensor_rt::tensor_conv_f64 as *const u8,
-    );
-    jit_builder.symbol(
-        "__trt_fft_f64",
-        crate::tensor_rt::tensor_fft_f64 as *const u8,
-    );
-    jit_builder.symbol(
-        "__trt_rng_f64",
-        crate::tensor_rt::tensor_rng_f64 as *const u8,
-    );
-    // Live profiling probes (gated by ELODIN_CRANELIFT_DEBUG_DIR). Registered
+    // Live profiling probes are among these. They are registered
     // unconditionally so calls from JIT IR can resolve; only emitted into
     // the IR when `CompileConfig::profile_enabled` is true.
-    jit_builder.symbol(
-        "__cranelift_profile_enter",
-        crate::profile::__cranelift_profile_enter as *const u8,
-    );
-    jit_builder.symbol(
-        "__cranelift_profile_exit",
-        crate::profile::__cranelift_profile_exit as *const u8,
-    );
-    jit_builder.symbol(
-        "__cranelift_marshal_begin",
-        crate::profile::__cranelift_marshal_begin as *const u8,
-    );
-    jit_builder.symbol(
-        "__cranelift_marshal_end",
-        crate::profile::__cranelift_marshal_end as *const u8,
-    );
-    jit_builder.symbol(
-        "__cranelift_xcend_begin",
-        crate::profile::__cranelift_xcend_begin as *const u8,
-    );
-    jit_builder.symbol(
-        "__cranelift_xcend_end",
-        crate::profile::__cranelift_xcend_end as *const u8,
-    );
-    jit_builder.symbol(
-        "__cranelift_call_begin",
-        crate::profile::__cranelift_call_begin as *const u8,
-    );
-    jit_builder.symbol(
-        "__cranelift_call_end",
-        crate::profile::__cranelift_call_end as *const u8,
-    );
-    jit_builder.symbol(
-        "__cranelift_loop_iter",
-        crate::profile::__cranelift_loop_iter as *const u8,
-    );
-    jit_builder.symbol(
-        "__cranelift_op_begin",
-        crate::profile::__cranelift_op_begin as *const u8,
-    );
-    jit_builder.symbol(
-        "__cranelift_op_end",
-        crate::profile::__cranelift_op_end as *const u8,
-    );
-    register_tensor_rt_symbols(&mut jit_builder);
+    for (symbol, ptr) in runtime_symbols() {
+        jit_builder.symbol(symbol, ptr);
+    }
 
     let external_constants = collect_external_constants(ir_module);
     for constant in external_constants.values() {
@@ -1736,11 +1599,400 @@ pub fn compile_module_with_config(
             .map_err(|e| format!("declare external constant {symbol}: {e}"))?;
         external_data_ids.insert(symbol.clone(), data_id);
     }
+
+    let lowered = lower_module(
+        &mut jit_module,
+        ir_module,
+        &config,
+        &parallel_groups,
+        &external_data_ids,
+        ("main", Linkage::Export),
+    )?;
+
+    let finalize_start = std::time::Instant::now();
+    jit_module
+        .finalize_definitions()
+        .map_err(|e| format!("finalize: {e}"))?;
+    let link_ms = lowered.link_ms + finalize_start.elapsed().as_secs_f64() * 1000.0;
+
+    let main_fn_id = *lowered.func_ids.get("main").ok_or("no main function")?;
+
+    // Capture the FuncId ↔ name / ABI / static-instr-count mapping so
+    // the runtime profiler can resolve `fid` back to function names
+    // when rendering the exit report. Always runs (cheap); probes only
+    // hit the registry when debug mode is on. Source-line map lets
+    // Tracy zones link back to the StableHLO MLIR. Split case-branch
+    // functions are folded into the name map so their `fid`s resolve
+    // in the report alongside the top-level ones.
+    let source_lines: HashMap<String, u32> = ir_module
+        .functions
+        .iter()
+        .filter_map(|f| f.source_line.map(|l| (f.name.clone(), l)))
+        .collect();
+    let mut all_func_ids = lowered.func_ids.clone();
+    all_func_ids.extend(lowered.extra_names);
+    crate::profile::register_static_data(&all_func_ids, &source_lines);
+
+    print_instr_report();
+
+    Ok(CompiledModule {
+        module: jit_module,
+        main_fn_id,
+        _external_constants: external_constants.values().cloned().collect(),
+        timings: CompileTimings {
+            ir_build_ms: lowered.ir_build_ms,
+            codegen_ms: lowered.codegen_ms,
+            link_ms,
+        },
+    })
+}
+
+/// Compiles `ir_module` ahead of time into a relocatable object for this host.
+///
+/// The object defines `{prefix}_step`, called like the JIT `main`. It imports no runtime
+/// function by name: each call goes through a slot of `{prefix}_imports`, which the loader fills
+/// with [`runtime_symbol`] of the `{prefix}_import_count` NUL-terminated names in
+/// `{prefix}_import_names` before the first step. All four symbols are hidden, for linking into
+/// one shared library. With `workers` above 1, groups of independent calls run through the
+/// runtime's `pool::run`, on as many pool threads as the loader starts.
+pub fn compile_module_to_object(
+    ir_module: &crate::ir::Module,
+    prefix: &str,
+    workers: usize,
+    cpu: &str,
+) -> Result<Vec<u8>, String> {
+    // Profiling probes keep process-local state.
+    let config = CompileConfig {
+        workers: workers.max(1),
+        ..CompileConfig::default()
+    };
+    let (ir_module, parallel_groups) = prepare_module(ir_module, &config);
+    let ir_module = &ir_module;
+
+    let builder = ObjectBuilder::new(
+        build_isa(true, cpu)?,
+        prefix,
+        cranelift_module::default_libcall_names(),
+    )
+    .map_err(|e| format!("object builder: {e}"))?;
+    let mut module = ObjectModule::new(builder);
+
+    let mut external_constants: Vec<_> =
+        collect_external_constants(ir_module).into_iter().collect();
+    external_constants.sort_by(|a, b| a.0.cmp(&b.0));
+    let mut external_data_ids = HashMap::new();
+    for (symbol, constant) in &external_constants {
+        let data_id = module
+            .declare_data(symbol, Linkage::Local, false, false)
+            .map_err(|e| format!("declare external constant {symbol}: {e}"))?;
+        let mut data = DataDescription::new();
+        data.define(constant.as_bytes().into());
+        data.set_align(64);
+        module
+            .define_data(data_id, &data)
+            .map_err(|e| format!("define external constant {symbol}: {e}"))?;
+        external_data_ids.insert(symbol.clone(), data_id);
+    }
+
+    lower_module(
+        &mut module,
+        ir_module,
+        &config,
+        &parallel_groups,
+        &external_data_ids,
+        (&format!("{prefix}_step"), Linkage::Hidden),
+    )?;
+    define_import_trampolines(&mut module, prefix)?;
+
+    module
+        .finish()
+        .emit()
+        .map_err(|e| format!("emit object: {e}"))
+}
+
+/// Turns every runtime import into a local function that calls through a slot of
+/// `{prefix}_imports`, and records the slots' names for the loader.
+fn define_import_trampolines(module: &mut ObjectModule, prefix: &str) -> Result<(), String> {
+    let imports: Vec<(FuncId, String, Signature)> = module
+        .declarations()
+        .get_functions()
+        .filter(|(_, decl)| decl.linkage == Linkage::Import)
+        .map(|(id, decl)| {
+            (
+                id,
+                decl.linkage_name(id).into_owned(),
+                decl.signature.clone(),
+            )
+        })
+        .collect();
+
+    let mut define = |name: String, writable: bool, data: DataDescription| {
+        let id = module
+            .declare_data(&name, Linkage::Hidden, writable, false)
+            .map_err(|e| format!("declare {name}: {e}"))?;
+        module
+            .define_data(id, &data)
+            .map_err(|e| format!("define {name}: {e}"))?;
+        Ok::<_, String>(id)
+    };
+    let mut table = DataDescription::new();
+    table.define_zeroinit(imports.len().max(1) * 8);
+    table.set_align(8);
+    let table_id = define(format!("{prefix}_imports"), true, table)?;
+    let mut names = DataDescription::new();
+    names.define(
+        imports
+            .iter()
+            .flat_map(|(_, name, _)| name.bytes().chain([0]))
+            .collect(),
+    );
+    define(format!("{prefix}_import_names"), false, names)?;
+    let mut count = DataDescription::new();
+    count.define(Box::new((imports.len() as u64).to_le_bytes()));
+    count.set_align(8);
+    define(format!("{prefix}_import_count"), false, count)?;
+
+    let mut func_ctx = FunctionBuilderContext::new();
+    for (slot, (id, name, sig)) in imports.into_iter().enumerate() {
+        if runtime_symbol(&name).is_none() {
+            return Err(format!("the generated code imports unknown symbol {name}"));
+        }
+        module
+            .declare_function(&name, Linkage::Local, &sig)
+            .map_err(|e| format!("declare {name}: {e}"))?;
+        let mut ctx = module.make_context();
+        ctx.func.signature = sig.clone();
+        let mut builder = FunctionBuilder::new(&mut ctx.func, &mut func_ctx);
+        let block = builder.create_block();
+        builder.append_block_params_for_function_params(block);
+        builder.switch_to_block(block);
+        builder.seal_block(block);
+        let table = module.declare_data_in_func(table_id, builder.func);
+        let base = builder.ins().global_value(ptr_type(), table);
+        let callee = builder
+            .ins()
+            .load(ptr_type(), MemFlags::trusted(), base, (slot * 8) as i32);
+        let sig_ref = builder.import_signature(sig);
+        let args = builder.block_params(block).to_vec();
+        let call = builder.ins().call_indirect(sig_ref, callee, &args);
+        let results = builder.inst_results(call).to_vec();
+        builder.ins().return_(&results);
+        builder.finalize();
+        module
+            .define_function(id, &mut ctx)
+            .map_err(|e| format!("define trampoline {name}: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Every function generated code can call, under the name it imports.
+fn runtime_symbols() -> Vec<(&'static str, *const u8)> {
+    use crate::profile::*;
+    use crate::tensor_rt::{tensor_reduce_window as rw, tensor_select_and_scatter as sas};
+    let mut symbols: Vec<(&'static str, *const u8)> = vec![
+        ("sin", libc_sin as *const u8),
+        ("cos", libc_cos as *const u8),
+        ("atan2", libc_atan2 as *const u8),
+        ("sqrt", libc_sqrt as *const u8),
+        ("fabs", libc_fabs as *const u8),
+        ("fmod", libc_fmod as *const u8),
+        ("acos", libc_acos as *const u8),
+        ("log", libc_log as *const u8),
+        ("exp", libc_exp as *const u8),
+        ("pow", libc_pow as *const u8),
+        ("tanh", libc_tanh as *const u8),
+        ("tan", libc_tan as *const u8),
+        ("erf_inv_impl", erf_inv_scalar as *const u8),
+        ("log1p_impl", libc_log1p as *const u8),
+        ("asin_impl", libc_asin as *const u8),
+        ("atan_impl", libc_atan as *const u8),
+        ("sinh_impl", libc_sinh as *const u8),
+        ("cosh_impl", libc_cosh as *const u8),
+        ("erfc_impl_scalar", libc_erfc as *const u8),
+        ("expm1_impl", libc_expm1 as *const u8),
+        ("cbrt_impl", libc_cbrt as *const u8),
+        ("__cranelift_svd", cranelift_svd as *const u8),
+        ("__cranelift_lu", cranelift_lu as *const u8),
+        ("__cranelift_trsm", cranelift_trsm as *const u8),
+        ("__cranelift_cholesky", cranelift_cholesky as *const u8),
+        ("__cranelift_qr", cranelift_qr as *const u8),
+        ("__cranelift_orgqr", cranelift_orgqr as *const u8),
+        ("__cranelift_syevd", cranelift_syevd as *const u8),
+        ("__cranelift_gesv", cranelift_gesv as *const u8),
+        ("__cranelift_potrs", cranelift_potrs as *const u8),
+        ("__cranelift_gelsd", cranelift_gelsd as *const u8),
+        ("__cranelift_geev", cranelift_geev as *const u8),
+        ("__cranelift_gesvd", cranelift_gesvd as *const u8),
+        (
+            "__trt_batch_norm_inference_f64",
+            crate::tensor_rt::tensor_batch_norm_inference_f64 as *const u8,
+        ),
+        (
+            "__trt_real_dynamic_slice",
+            crate::tensor_rt::tensor_real_dynamic_slice as *const u8,
+        ),
+        (
+            "__trt_map_f64",
+            crate::tensor_rt::tensor_map_f64 as *const u8,
+        ),
+        ("__trt_reduce_window_f64", rw::<f64> as *const u8),
+        ("__trt_reduce_window_f32", rw::<f32> as *const u8),
+        ("__trt_reduce_window_i64", rw::<i64> as *const u8),
+        ("__trt_reduce_window_i32", rw::<i32> as *const u8),
+        ("__trt_select_and_scatter_f64", sas::<f64> as *const u8),
+        ("__trt_select_and_scatter_f32", sas::<f32> as *const u8),
+        ("__trt_select_and_scatter_i64", sas::<i64> as *const u8),
+        ("__trt_select_and_scatter_i32", sas::<i32> as *const u8),
+        (
+            "__trt_conv_f64",
+            crate::tensor_rt::tensor_conv_f64 as *const u8,
+        ),
+        (
+            "__trt_fft_f64",
+            crate::tensor_rt::tensor_fft_f64 as *const u8,
+        ),
+        (
+            "__trt_rng_f64",
+            crate::tensor_rt::tensor_rng_f64 as *const u8,
+        ),
+        (
+            "__cranelift_profile_enter",
+            __cranelift_profile_enter as *const u8,
+        ),
+        (
+            "__cranelift_profile_exit",
+            __cranelift_profile_exit as *const u8,
+        ),
+        (
+            "__cranelift_marshal_begin",
+            __cranelift_marshal_begin as *const u8,
+        ),
+        (
+            "__cranelift_marshal_end",
+            __cranelift_marshal_end as *const u8,
+        ),
+        (
+            "__cranelift_xcend_begin",
+            __cranelift_xcend_begin as *const u8,
+        ),
+        ("__cranelift_xcend_end", __cranelift_xcend_end as *const u8),
+        (
+            "__cranelift_call_begin",
+            __cranelift_call_begin as *const u8,
+        ),
+        ("__cranelift_call_end", __cranelift_call_end as *const u8),
+        ("__cranelift_loop_iter", __cranelift_loop_iter as *const u8),
+        ("__cranelift_op_begin", __cranelift_op_begin as *const u8),
+        ("__cranelift_op_end", __cranelift_op_end as *const u8),
+    ];
+    symbols.extend(tensor_rt_symbols());
+    symbols
+}
+
+/// The runtime function generated code imports as `name`, for binding an object from
+/// [`compile_module_to_object`].
+pub fn runtime_symbol(name: &str) -> Option<*const u8> {
+    runtime_symbols()
+        .into_iter()
+        .find(|(symbol, _)| *symbol == name)
+        .map(|(_, ptr)| ptr)
+}
+
+/// Target triple and enabled ISA-specific flags for an AOT object.
+pub fn object_target(cpu: &str) -> Result<(String, Vec<(String, String)>), String> {
+    let isa = build_isa(true, cpu)?;
+    let flags = isa
+        .isa_flags()
+        .into_iter()
+        .map(|flag| (flag.name.to_string(), flag.value_string()))
+        .collect();
+    Ok((isa.triple().to_string(), flags))
+}
+
+fn build_isa(pic: bool, cpu: &str) -> Result<cranelift_codegen::isa::OwnedTargetIsa, String> {
+    let mut flag_builder = settings::builder();
+    flag_builder.set("opt_level", "speed").unwrap();
+    flag_builder
+        .set("is_pic", if pic { "true" } else { "false" })
+        .unwrap();
+    let isa_builder = match cpu {
+        "native" => cranelift_native::builder(),
+        "generic" => cranelift_native::builder_with_options(false),
+        other => return Err(format!("CPU must be native or generic, not {other:?}")),
+    }
+    .map_err(|e| format!("{cpu} ISA: {e}"))?;
+    isa_builder
+        .finish(settings::Flags::new(flag_builder))
+        .map_err(|e| format!("ISA finish: {e}"))
+}
+
+/// The module after the IR-level inliners, and the call groups to run on workers.
+fn prepare_module(
+    ir_module: &crate::ir::Module,
+    config: &CompileConfig,
+) -> (crate::ir::Module, HashMap<String, Vec<Range<usize>>>) {
+    // Single-caller inliner. Runs once per compile, at the IR level
+    // before any Cranelift codegen. Replaces `Instruction::Call`
+    // sites whose callee has exactly one caller and a small body
+    // with the inlined body, eliminating the call overhead. Clone
+    // the module because the public API takes `&Module`; one extra
+    // Vec clone is negligible next to Cranelift codegen.
+    let mut parallel_groups = HashMap::new();
+    let mut mut_module = ir_module.clone();
+    let changed = crate::inliner::inline_tiny_callees(&mut mut_module, |f| {
+        classify_function(f) == FuncAbi::Scalar
+    });
+    crate::const_fold::refold(&mut mut_module, &changed);
+    let inlined = crate::inliner::inline_single_caller_callees(&mut mut_module);
+    if inlined > 0 && crate::debug::enabled() {
+        eprintln!(
+            "[elodin-cranelift] inliner: inlined {} single-caller callee(s)",
+            inlined
+        );
+    }
+    if config.workers > 1 && !config.profile_enabled {
+        parallel_groups = crate::parallel::group_module_calls(&mut mut_module, |f| {
+            classify_function(f) == FuncAbi::Pointer
+        });
+    }
+    (mut_module, parallel_groups)
+}
+
+/// What [`lower_module`] defined in its module.
+struct Lowered {
+    func_ids: HashMap<String, FuncId>,
+    /// Functions split out of case branches, by name.
+    extra_names: HashMap<String, FuncId>,
+    ir_build_ms: f64,
+    codegen_ms: f64,
+    link_ms: f64,
+}
+
+/// Declares and defines every function of `ir_module` in `module`, with `main` under the
+/// symbol and linkage of `main_symbol`. A JIT module still needs finalizing.
+fn lower_module(
+    module: &mut dyn Module,
+    ir_module: &crate::ir::Module,
+    config: &CompileConfig,
+    parallel_groups: &HashMap<String, Vec<Range<usize>>>,
+    external_data_ids: &HashMap<String, DataId>,
+    main_symbol: (&str, Linkage),
+) -> Result<Lowered, String> {
+    reset_instr_counts();
+    // Defensive clear: a prior compile that errored partway through
+    // Phase 1 may have left `(FuncId, Context)` entries behind on this
+    // thread. Those FuncIds belong to a now-dead module, so carrying
+    // them into the next compile's Phase 2 would corrupt symbol
+    // resolution. Start every compile with an empty buffer.
+    let _ = drain_pending_functions();
+
+    let call_conv = module.isa().default_call_conv();
     let func_abis = classify_all_functions(ir_module);
-    let func_ids = declare_all_functions(ir_module, &mut jit_module, call_conv, &func_abis)?;
-    let libm_ids = declare_libm_functions(&mut jit_module, call_conv)?;
-    let trt_ids = declare_tensor_rt_functions(&mut jit_module, call_conv)?;
-    let profile_ids = declare_profile_functions(&mut jit_module, call_conv)?;
+    let func_ids = declare_all_functions(ir_module, module, call_conv, &func_abis, main_symbol)?;
+    let libm_ids = declare_libm_functions(module, call_conv)?;
+    let trt_ids = declare_tensor_rt_functions(module, call_conv)?;
+    let profile_ids = declare_profile_functions(module, call_conv)?;
+    let trampolines = declare_task_trampolines(ir_module, parallel_groups, module, call_conv)?;
 
     // Expose ProfileIds via a thread-local so deep-in-the-stack emission
     // helpers (`emit_marshal_probe`, `emit_xcend_probe`) can look them up
@@ -1756,7 +2008,7 @@ pub fn compile_module_with_config(
     // Three-phase compile pipeline.
     //
     //   Phase 1 (serial): lower each IR function to Cranelift IR. Uses
-    //       `&mut jit_module` for signature/data/func-ref declarations,
+    //       `&mut module` for signature/data/func-ref declarations,
     //       so it must stay single-threaded. `build_function_ir` returns
     //       the populated `Context` without invoking codegen.
     //
@@ -1767,7 +2019,7 @@ pub fn compile_module_with_config(
     //       `Send + Sync` by Cranelift's design).
     //
     //   Phase 3 (serial): link each function's bytes + relocs into the
-    //       `JITModule` via `define_function_bytes`. Cheap; just registers
+    //       module via `define_function_bytes`. Cheap; just registers
     //       the compiled blob and queues it for `finalize_definitions`.
     //
     // Nested region bodies (map / reduce_window / sort comparators, etc.)
@@ -1785,9 +2037,13 @@ pub fn compile_module_with_config(
             .get(&func_def.name)
             .copied()
             .unwrap_or(FuncAbi::Scalar);
+        let groups = parallel_groups.get(&func_def.name).map(|runs| CallGroups {
+            runs,
+            trampolines: &trampolines,
+        });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             build_function_ir(
-                &mut jit_module,
+                module,
                 func_def,
                 ir_module,
                 &func_ids,
@@ -1795,10 +2051,11 @@ pub fn compile_module_with_config(
                 &libm_ids,
                 &trt_ids,
                 &profile_ids,
-                &external_data_ids,
+                external_data_ids,
                 abi,
                 fid,
-                &config,
+                config,
+                groups,
             )
         }));
         match result {
@@ -1816,13 +2073,21 @@ pub fn compile_module_with_config(
             }
         }
     }
+    for (callee, &fid) in &trampolines {
+        let callee_def = ir_module
+            .get_func(callee)
+            .ok_or_else(|| format!("task trampoline: no func def for {callee}"))?;
+        let ctx =
+            build_task_trampoline(module, callee_def, func_ids[callee], func_abis[callee], fid);
+        pending.push((fid, ctx));
+    }
 
     // Drain any case-branch (or future Phase-1 splitter) functions that
     // were queued as a side effect of lowering the top-level functions
     // above. They're fully-lowered `(FuncId, Context)` pairs; Phase 2
     // treats them identically to a top-level function and schedules
     // their codegen on the same rayon thread pool. Names are held
-    // aside to feed into `register_static_data` below so the runtime
+    // aside to feed into `register_static_data` so the runtime
     // profile report can resolve split-branch fids back to a symbol.
     let mut extra_names: HashMap<String, FuncId> = HashMap::new();
     for extra in drain_pending_functions() {
@@ -1833,7 +2098,7 @@ pub fn compile_module_with_config(
 
     // Phase 2: parallel codegen. The returned compiled blob is extracted
     // from each `Context` into owned `Vec<u8>` + `Vec<ModuleReloc>` so the
-    // Context can be dropped before Phase 3 reacquires `&mut jit_module`.
+    // Context can be dropped before Phase 3 reacquires `&mut module`.
     //
     // Amdahl's law gate: a single oversized function (e.g. cube-sat's
     // EGM08 gravity model, ~2.5 MB of machine code after lowering)
@@ -1846,7 +2111,7 @@ pub fn compile_module_with_config(
     let debug_codegen = crate::debug::enabled();
     let compiled: Vec<(FuncId, u64, Vec<u8>, Vec<cranelift_module::ModuleReloc>)> = {
         use rayon::prelude::*;
-        let isa = jit_module.isa();
+        let isa = module.isa();
         pending
             .into_par_iter()
             .map(|(fid, mut ctx)| -> Result<_, String> {
@@ -1880,63 +2145,35 @@ pub fn compile_module_with_config(
     };
     let codegen_ms = phase2_start.elapsed().as_secs_f64() * 1000.0;
 
-    // Phase 3: serial link into the JIT module.
+    // Phase 3: serial link into the module.
     let phase3_start = std::time::Instant::now();
     for (fid, alignment, bytes, relocs) in compiled {
-        jit_module
+        module
             .define_function_bytes(fid, alignment, &bytes, &relocs)
             .map_err(|e| format!("link {}: {e}", fid.as_u32()))?;
     }
-
-    jit_module
-        .finalize_definitions()
-        .map_err(|e| format!("finalize: {e}"))?;
     let link_ms = phase3_start.elapsed().as_secs_f64() * 1000.0;
 
-    let main_fn_id = *func_ids.get("main").ok_or("no main function")?;
-
-    // Capture the FuncId ↔ name / ABI / static-instr-count mapping so
-    // the runtime profiler can resolve `fid` back to function names
-    // when rendering the exit report. Always runs (cheap); probes only
-    // hit the registry when debug mode is on. Source-line map lets
-    // Tracy zones link back to the StableHLO MLIR. Split case-branch
-    // functions are folded into the name map so their `fid`s resolve
-    // in the report alongside the top-level ones.
-    let source_lines: HashMap<String, u32> = ir_module
-        .functions
-        .iter()
-        .filter_map(|f| f.source_line.map(|l| (f.name.clone(), l)))
-        .collect();
-    let mut all_func_ids = func_ids.clone();
-    for (name, fid) in extra_names {
-        all_func_ids.insert(name, fid);
-    }
-    crate::profile::register_static_data(&all_func_ids, &source_lines);
-
-    print_instr_report();
-
     // Clear the thread-local ProfileIds handle now that compilation is
-    // done. The JIT still holds the registered symbols, and subsequent
-    // runtime calls from JIT code resolve by name not FuncId.
+    // done. Subsequent runtime calls from generated code resolve by name
+    // not FuncId.
     set_current_profile_ids(None);
 
-    Ok(CompiledModule {
-        module: jit_module,
-        main_fn_id,
-        _external_constants: external_constants.values().cloned().collect(),
-        timings: CompileTimings {
-            ir_build_ms,
-            codegen_ms,
-            link_ms,
-        },
+    Ok(Lowered {
+        func_ids,
+        extra_names,
+        ir_build_ms,
+        codegen_ms,
+        link_ms,
     })
 }
 
 fn declare_all_functions(
     ir_module: &crate::ir::Module,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     call_conv: CallConv,
     func_abis: &HashMap<String, FuncAbi>,
+    (main_symbol, public_linkage): (&str, Linkage),
 ) -> Result<HashMap<String, FuncId>, String> {
     let mut ids = HashMap::new();
     for func_def in &ir_module.functions {
@@ -1969,16 +2206,134 @@ fn declare_all_functions(
         }
 
         let linkage = if func_def.is_public {
-            Linkage::Export
+            public_linkage
         } else {
             Linkage::Local
         };
+        let symbol = if func_def.name == "main" {
+            main_symbol
+        } else {
+            &func_def.name
+        };
         let fid = jit_module
-            .declare_function(&func_def.name, linkage, &sig)
+            .declare_function(symbol, linkage, &sig)
             .map_err(|e| format!("declare {}: {e}", func_def.name))?;
         ids.insert(func_def.name.clone(), fid);
     }
     Ok(ids)
+}
+
+/// The runs of independent calls in one function's top-level body, and the trampoline that
+/// runs each callee as a pool task.
+#[derive(Clone, Copy)]
+struct CallGroups<'a> {
+    runs: &'a [Range<usize>],
+    trampolines: &'a HashMap<String, FuncId>,
+}
+
+/// Declares one `fn(task)` trampoline per callee in `groups` (see [`build_task_trampoline`]).
+fn declare_task_trampolines(
+    ir_module: &crate::ir::Module,
+    groups: &HashMap<String, Vec<Range<usize>>>,
+    jit_module: &mut dyn Module,
+    call_conv: CallConv,
+) -> Result<HashMap<String, FuncId>, String> {
+    let mut trampolines = HashMap::new();
+    for (func, runs) in groups {
+        let body = &ir_module
+            .get_func(func)
+            .ok_or_else(|| format!("call group in unknown function {func}"))?
+            .body;
+        for ir in runs.iter().flat_map(|run| &body[run.clone()]) {
+            let Instruction::Call { callee, .. } = &ir.instr else {
+                continue;
+            };
+            if trampolines.contains_key(callee) {
+                continue;
+            }
+            let mut sig = jit_module.make_signature();
+            sig.call_conv = call_conv;
+            sig.params.push(AbiParam::new(ptr_type()));
+            let fid = jit_module
+                .declare_function(&format!("__task_{callee}"), Linkage::Local, &sig)
+                .map_err(|e| format!("declare task trampoline for {callee}: {e}"))?;
+            trampolines.insert(callee.clone(), fid);
+        }
+    }
+    Ok(trampolines)
+}
+
+/// `fn(task)`: calls `callee` with the argument pointers and result buffer that
+/// [`lower_call_group`] stored in `task`, marshalling a scalar-ABI callee's lanes the way a
+/// pointer-ABI call does.
+fn build_task_trampoline(
+    jit_module: &mut dyn Module,
+    callee: &FuncDef,
+    callee_fid: FuncId,
+    callee_abi: FuncAbi,
+    fid: FuncId,
+) -> cranelift_codegen::Context {
+    let mut ctx = jit_module.make_context();
+    ctx.func.signature = jit_module
+        .declarations()
+        .get_function_decl(fid)
+        .signature
+        .clone();
+    ctx.func.name = cranelift_codegen::ir::UserFuncName::user(0, fid.as_u32());
+    let mut func_ctx = FunctionBuilderContext::new();
+    let mut builder = FunctionBuilder::new(&mut ctx.func, &mut func_ctx);
+    let entry = builder.create_block();
+    builder.append_block_params_for_function_params(entry);
+    builder.switch_to_block(entry);
+    builder.seal_block(entry);
+    let task = builder.block_params(entry)[0];
+    let mut pointers: Vec<Value> = (0..=callee.params.len())
+        .map(|i| {
+            builder
+                .ins()
+                .load(ptr_type(), MemFlags::trusted(), task, (8 * i) as i32)
+        })
+        .collect();
+    let ret = *pointers
+        .last()
+        .expect("the result buffer follows the arguments");
+    let callee_ref = jit_module.declare_func_in_func(callee_fid, builder.func);
+    if callee_abi == FuncAbi::Pointer {
+        builder.ins().call(callee_ref, &pointers);
+    } else {
+        pointers.pop();
+        let mut args = Vec::new();
+        for (&ptr, (_, ty)) in pointers.iter().zip(&callee.params) {
+            let ct = cranelift_type_for(ty.element_type);
+            let esz = ty.element_type.byte_size();
+            for j in 0..ty.num_elements() {
+                let lane = builder
+                    .ins()
+                    .load(ct, MemFlags::trusted(), ptr, (j * esz) as i32);
+                args.push(lane);
+            }
+        }
+        if needs_sret(&callee.result_types) {
+            args.push(ret);
+            builder.ins().call(callee_ref, &args);
+        } else {
+            let call = builder.ins().call(callee_ref, &args);
+            let mut results = builder.inst_results(call).to_vec().into_iter();
+            let mut offset = 0;
+            for ty in &callee.result_types {
+                let esz = ty.element_type.byte_size();
+                for (j, lane) in results.by_ref().take(ty.num_elements()).enumerate() {
+                    builder
+                        .ins()
+                        .store(MemFlags::trusted(), lane, ret, (offset + j * esz) as i32);
+                }
+                offset += ty.byte_size();
+            }
+        }
+    }
+    builder.ins().return_(&[]);
+    builder.finalize();
+    ctx
 }
 
 // ---------------------------------------------------------------------------
@@ -2050,7 +2405,7 @@ fn drain_pending_functions() -> Vec<PendingExtraFn> {
 ///
 /// Returned `Vec` is sorted by `ValueId::0` so call-site argument order
 /// is deterministic between caller and callee.
-fn collect_captured_vids(body: &[InstrResult]) -> Vec<ValueId> {
+pub(crate) fn collect_captured_vids(body: &[InstrResult]) -> Vec<ValueId> {
     use std::collections::HashSet;
     let mut defined: HashSet<ValueId> = HashSet::new();
     let mut referenced: HashSet<ValueId> = HashSet::new();
@@ -2156,7 +2511,7 @@ fn collect_body_defs_uses(
 /// rayon codegen wave as the top-level functions picks it up.
 #[allow(clippy::too_many_arguments)]
 fn compile_case_branch_as_function_mem(
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     ir_module: &crate::ir::Module,
     func_ids: &HashMap<String, FuncId>,
     func_abis: &HashMap<String, FuncAbi>,
@@ -2221,6 +2576,7 @@ fn compile_case_branch_as_function_mem(
             &mut value_map,
             &mut type_map,
             HashMap::new(),
+            None,
         )?;
 
         // Memcpy each Return operand's slot into the caller-provided
@@ -2265,7 +2621,7 @@ fn compile_case_branch_as_function_mem(
 }
 
 fn compile_region_as_function(
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     ir_module: &crate::ir::Module,
     func_ids: &HashMap<String, FuncId>,
     func_abis: &HashMap<String, FuncAbi>,
@@ -2381,7 +2737,7 @@ fn compile_region_as_function(
 /// caller can batch codegen across a rayon thread pool; see the
 /// three-phase pipeline in `compile_module_with_config`.
 fn build_function_ir(
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     func_def: &crate::ir::FuncDef,
     ir_module: &crate::ir::Module,
     func_ids: &HashMap<String, FuncId>,
@@ -2393,6 +2749,7 @@ fn build_function_ir(
     abi: FuncAbi,
     fid: FuncId,
     config: &CompileConfig,
+    groups: Option<CallGroups>,
 ) -> Result<(FuncId, cranelift_codegen::Context), String> {
     let mut ctx = jit_module.make_context();
     let mut func_ctx = FunctionBuilderContext::new();
@@ -2434,6 +2791,7 @@ fn build_function_ir(
                 &block_params,
                 &mut value_map,
                 &mut type_map,
+                groups,
             )?;
         } else if func_def.name == "main" {
             lower_main_body(
@@ -2464,6 +2822,7 @@ fn build_function_ir(
                 &block_params,
                 &mut value_map,
                 &mut type_map,
+                groups,
             )?;
         } else {
             lower_callee_body(
@@ -2512,7 +2871,7 @@ fn lower_main_body(
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
     external_data_ids: &HashMap<String, DataId>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     block_params: &[Value],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
@@ -2753,16 +3112,30 @@ fn is_elision_aware_mem(instr: &Instruction) -> bool {
 }
 
 /// Pointer-ABI arms that may hand back an operand's or a constant's memory instead of a new slot.
-fn may_reuse_memory(instr: &Instruction) -> bool {
-    matches!(
-        instr,
-        Instruction::Reshape { .. }
-            | Instruction::Convert { .. }
-            | Instruction::BitcastConvert { .. }
-            | Instruction::Constant {
-                value: ConstantValue::DenseArray(_) | ConstantValue::DenseExternal { .. },
-            }
-    )
+fn may_reuse_memory(
+    instr: &Instruction,
+    type_map: &HashMap<ValueId, TensorType>,
+    rt: &TensorType,
+) -> bool {
+    match instr {
+        Instruction::Convert { operand } => type_map
+            .get(operand)
+            .is_some_and(|src| same_layout(src.element_type, rt.element_type)),
+        _ => matches!(
+            instr,
+            Instruction::Reshape { .. }
+                | Instruction::BitcastConvert { .. }
+                | Instruction::Constant {
+                    value: ConstantValue::DenseArray(_) | ConstantValue::DenseExternal { .. },
+                }
+        ),
+    }
+}
+
+/// Whether a `Convert` from `a` to `b` keeps every bit, so its result can share the operand's memory.
+fn same_layout(a: ElementType, b: ElementType) -> bool {
+    use ElementType::*;
+    a == b || matches!((a, b), (I32 | UI32, I32 | UI32) | (I64 | UI64, I64 | UI64))
 }
 
 /// Whether the pointer-ABI arm for `instr` has a kernel for its element types and
@@ -2915,7 +3288,7 @@ fn lower_mem_lanes(
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
     external_data_ids: &HashMap<String, DataId>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
     pool: &mut crate::slot_pool::SlotPool,
@@ -2955,6 +3328,7 @@ fn lower_mem_lanes(
         &mut lanes,
         type_map,
     )?;
+    check_lane_counts(instr, &outs, result_types)?;
     let mut results = Vec::with_capacity(outs.len());
     for (i, (mut out, ty)) in outs.into_iter().zip(result_types).enumerate() {
         out.unpack_in(builder);
@@ -3011,7 +3385,7 @@ fn should_elide(
 /// chunks directly via `LaneRepr::get_chunks`.
 fn lower_ptr_binop_elision_or_spill(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     pool: &mut crate::slot_pool::SlotPool,
     lhs_repr: &mut LaneRepr,
     rhs_repr: &mut LaneRepr,
@@ -3076,7 +3450,7 @@ fn lower_ptr_binop_elision_or_spill(
 /// so the write-back is a no-op copy in the hot case.
 fn emit_ptr_binop_f64(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     pool: &mut crate::slot_pool::SlotPool,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     lhs: &ValueId,
@@ -3134,7 +3508,7 @@ fn emit_ptr_binop_f64(
 /// both the chunk loop and the tail.
 fn lower_ptr_unop_elision_or_spill(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     pool: &mut crate::slot_pool::SlotPool,
     src_repr: &mut LaneRepr,
     src_vid: Option<ValueId>,
@@ -3164,7 +3538,7 @@ fn lower_ptr_unop_elision_or_spill(
 /// `lower_ptr_unop_elision_or_spill`, write back post-spill.
 fn emit_ptr_unop_f64(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     pool: &mut crate::slot_pool::SlotPool,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     operand: &ValueId,
@@ -3198,7 +3572,7 @@ fn emit_ptr_unop_f64(
 /// samples, which have no Max/Min category.
 fn emit_ptr_minmax_f64(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     pool: &mut crate::slot_pool::SlotPool,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     lhs: &ValueId,
@@ -3247,7 +3621,7 @@ fn emit_ptr_minmax_f64(
 /// tensor; `dst` is a fresh 16-byte-aligned slot.
 fn lower_ptr_binop_simd_f64(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     dst: Value,
     lhs: Value,
     rhs: Value,
@@ -3316,7 +3690,7 @@ fn lower_ptr_binop_simd_f64(
 /// F64X2 so the same closure serves both chunks and tail.
 fn lower_ptr_unop_simd_f64(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     dst: Value,
     src: Value,
     n: usize,
@@ -3375,7 +3749,7 @@ fn lower_ptr_unop_simd_f64(
 /// consistency with `trt_call`.
 fn trt_call_xcend_unary(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     func_id: FuncId,
     dst: Value,
     src: Value,
@@ -3393,7 +3767,7 @@ fn trt_call_xcend_unary(
 /// like Atan2 / Power. `dst, a, b, n` arg order.
 fn trt_call_xcend_binary(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     func_id: FuncId,
     dst: Value,
     a: Value,
@@ -3430,7 +3804,7 @@ fn lower_ptr_splat_simd_f64(builder: &mut FunctionBuilder, dst: Value, scalar: V
 /// A pointer to `vals` in the module's read-only data.
 fn store_i64_array(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     vals: &[i64],
 ) -> Value {
     let data_id = jit_module
@@ -3482,7 +3856,7 @@ fn window_kernel(et: ElementType) -> Option<&'static str> {
 #[allow(clippy::too_many_arguments)]
 fn emit_reduce_window(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     ir_module: &crate::ir::Module,
     func_ids: &HashMap<String, FuncId>,
     func_abis: &HashMap<String, FuncAbi>,
@@ -3605,7 +3979,7 @@ fn emit_reduce_window(
 #[allow(clippy::too_many_arguments)]
 fn emit_select_and_scatter(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     ir_module: &crate::ir::Module,
     func_ids: &HashMap<String, FuncId>,
     func_abis: &HashMap<String, FuncAbi>,
@@ -3804,7 +4178,7 @@ fn sort_order(comparator: &[InstrResult], params: &[ValueId]) -> (usize, bool) {
 /// Sorts the operand buffers in `ptrs` in place with `tensor_sort`.
 fn emit_sort(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     trt_ids: &TensorRtIds,
     ptrs: &[Value],
     types: &[TensorType],
@@ -3840,7 +4214,7 @@ fn emit_sort(
 /// Calls `tensor_argminmax` on `[dst_values, dst_indices, values, indices]`.
 fn emit_argminmax(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     trt_ids: &TensorRtIds,
     ptrs: [Value; 4],
     [val_ty, idx_ty]: [&TensorType; 2],
@@ -3881,7 +4255,7 @@ fn emit_argminmax(
 /// Scatters into `dst`, which must already hold the operand; `indices` must be i64.
 fn emit_scatter(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     trt_ids: &TensorRtIds,
     [dst, indices, updates]: [Value; 3],
     [operand_ty, indices_ty, updates_ty]: [&TensorType; 3],
@@ -3995,10 +4369,11 @@ fn lower_pointer_body(
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
     external_data_ids: &HashMap<String, DataId>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     block_params: &[Value],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
+    groups: Option<CallGroups>,
 ) -> Result<(), String> {
     for (i, (vid, ty)) in func_def.params.iter().enumerate() {
         let param_ptr = block_params[i];
@@ -4034,6 +4409,7 @@ fn lower_pointer_body(
         value_map,
         type_map,
         destinations,
+        groups,
     )?;
 
     if let Some(ret_instr) = func_def.body.last()
@@ -4075,10 +4451,11 @@ fn lower_main_body_mem(
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
     external_data_ids: &HashMap<String, DataId>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     block_params: &[Value],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
+    groups: Option<CallGroups>,
 ) -> Result<(), String> {
     let inputs_ptr = block_params[0];
     let outputs_ptr = block_params[1];
@@ -4108,6 +4485,7 @@ fn lower_main_body_mem(
         value_map,
         type_map,
         destinations,
+        groups,
     )?;
 
     if let Some(ret_instr) = func_def.body.last()
@@ -4148,10 +4526,11 @@ fn lower_body_mem(
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
     external_data_ids: &HashMap<String, DataId>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
     destinations: HashMap<ValueId, crate::slot_pool::Destination>,
+    groups: Option<CallGroups>,
 ) -> Result<HashMap<ValueId, (Value, usize)>, String> {
     // Use-info pass so producers can query single-use + consumer-kind
     // to decide between elision (`PtrChunksF64`) and spill
@@ -4161,33 +4540,56 @@ fn lower_body_mem(
     // nested While/Case recursions get their own pool because the
     // recursive call allocates a fresh `SlotPool::default()`.
     let mut pool = crate::slot_pool::SlotPool::with_destinations(destinations);
+    // Instructions before this position were lowered with their call group.
+    let mut grouped_until = 0;
     for (pos, ir) in body.iter().enumerate() {
         if matches!(ir.instr, Instruction::Return { .. }) {
             break;
         }
-        let result_types: Vec<TensorType> = ir.values.iter().map(|(_, t)| t.clone()).collect();
-        let result_vid = ir.values.first().map(|(vid, _)| *vid);
-        let result_vals = lower_instruction_mem(
-            builder,
-            &ir.instr,
-            &result_types,
-            ir_module,
-            func_ids,
-            libm_ids,
-            trt_ids,
-            func_abis,
-            external_data_ids,
-            jit_module,
-            value_map,
-            type_map,
-            Some(&use_info),
-            result_vid,
-            &mut pool,
-        )?;
-        for (i, (vid, ty)) in ir.values.iter().enumerate() {
-            if i < result_vals.len() {
-                value_map.insert(*vid, result_vals[i].clone());
-                type_map.insert(*vid, ty.clone());
+        let run = groups.and_then(|g| g.runs.iter().find(|run| run.start == pos));
+        if let (Some(groups), Some(run)) = (groups, run) {
+            let calls = &body[run.clone()];
+            let results = lower_call_group(
+                builder,
+                calls,
+                ir_module,
+                trt_ids,
+                groups.trampolines,
+                jit_module,
+                value_map,
+            )?;
+            for (call, call_results) in calls.iter().zip(results) {
+                for ((vid, ty), lanes) in call.values.iter().zip(call_results) {
+                    value_map.insert(*vid, lanes);
+                    type_map.insert(*vid, ty.clone());
+                }
+            }
+            grouped_until = run.end;
+        } else if pos >= grouped_until {
+            let result_types: Vec<TensorType> = ir.values.iter().map(|(_, t)| t.clone()).collect();
+            let result_vid = ir.values.first().map(|(vid, _)| *vid);
+            let result_vals = lower_instruction_mem(
+                builder,
+                &ir.instr,
+                &result_types,
+                ir_module,
+                func_ids,
+                libm_ids,
+                trt_ids,
+                func_abis,
+                external_data_ids,
+                jit_module,
+                value_map,
+                type_map,
+                Some(&use_info),
+                result_vid,
+                &mut pool,
+            )?;
+            for (i, (vid, ty)) in ir.values.iter().enumerate() {
+                if i < result_vals.len() {
+                    value_map.insert(*vid, result_vals[i].clone());
+                    type_map.insert(*vid, ty.clone());
+                }
             }
         }
         // Release pool-owned slots whose last operand use was this
@@ -4213,6 +4615,76 @@ fn lower_body_mem(
     Ok(pool.into_placed())
 }
 
+/// Runs `calls`, none of which reads another's results, as one task table on [`crate::pool`].
+/// Each task holds its call's argument pointers followed by its result buffer, for the callee's
+/// trampoline to read.
+fn lower_call_group(
+    builder: &mut FunctionBuilder,
+    calls: &[InstrResult],
+    ir_module: &crate::ir::Module,
+    trt_ids: &TensorRtIds,
+    trampolines: &HashMap<String, FuncId>,
+    jit_module: &mut dyn Module,
+    value_map: &mut HashMap<ValueId, LaneRepr>,
+) -> Result<Vec<Vec<LaneRepr>>, String> {
+    let tasks = alloc_slot(builder, 16 * calls.len());
+    let mut results = Vec::with_capacity(calls.len());
+    for (i, ir) in calls.iter().enumerate() {
+        let Instruction::Call { callee, args } = &ir.instr else {
+            return Err("call group holds a non-call".into());
+        };
+        let callee_def = ir_module
+            .get_func(callee)
+            .ok_or_else(|| format!("call group: no func def for {callee}"))?;
+        let task = alloc_slot(builder, 8 * (args.len() + 1));
+        for (j, vid) in args.iter().enumerate() {
+            let lanes = value_map
+                .get_mut(vid)
+                .ok_or_else(|| format!("call group: missing value {vid:?}"))?;
+            let arg = lanes.as_scalar_or_spill(builder)[0];
+            builder
+                .ins()
+                .store(MemFlags::trusted(), arg, task, (8 * j) as i32);
+        }
+        let ret_bytes: usize = callee_def.result_types.iter().map(|t| t.byte_size()).sum();
+        let ret = alloc_slot(builder, ret_bytes.max(MIN_RETURN_SLOT));
+        builder
+            .ins()
+            .store(MemFlags::trusted(), ret, task, (8 * args.len()) as i32);
+        let trampoline = jit_module.declare_func_in_func(trampolines[callee], builder.func);
+        let func = builder.ins().func_addr(ptr_type(), trampoline);
+        builder
+            .ins()
+            .store(MemFlags::trusted(), func, tasks, (16 * i) as i32);
+        builder
+            .ins()
+            .store(MemFlags::trusted(), task, tasks, (16 * i + 8) as i32);
+        let mut offset = 0;
+        let mut call_results = Vec::with_capacity(callee_def.result_types.len());
+        for ty in &callee_def.result_types {
+            let addr = builder.ins().iadd_imm(ret, offset as i64);
+            call_results.push(LaneRepr::scalar(vec![addr]));
+            offset += ty.byte_size();
+        }
+        results.push(call_results);
+    }
+    let estimate_id = jit_module
+        .declare_anonymous_data(true, false)
+        .map_err(|e| format!("declare call group estimate: {e}"))?;
+    let mut estimate_data = DataDescription::new();
+    estimate_data.define_zeroinit(8);
+    estimate_data.set_align(8);
+    jit_module
+        .define_data(estimate_id, &estimate_data)
+        .map_err(|e| format!("define call group estimate: {e}"))?;
+    let estimate_gv = jit_module.declare_data_in_func(estimate_id, builder.func);
+    let estimate = builder.ins().global_value(ptr_type(), estimate_gv);
+    let len = builder.ins().iconst(types::I64, calls.len() as i64);
+    let run = jit_module.declare_func_in_func(trt_ids.parallel, builder.func);
+    builder.ins().call(run, &[estimate, tasks, len]);
+    Ok(results)
+}
+
 fn lower_instruction_mem(
     builder: &mut FunctionBuilder,
     instr: &Instruction,
@@ -4223,7 +4695,7 @@ fn lower_instruction_mem(
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
     external_data_ids: &HashMap<String, DataId>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
     use_info: Option<&crate::useinfo::UseInfo>,
@@ -4237,7 +4709,7 @@ fn lower_instruction_mem(
     let n = rt.num_elements();
     let elem_sz = rt.element_type.byte_size();
 
-    if !may_reuse_memory(instr)
+    if !may_reuse_memory(instr, type_map, &rt)
         && let Some(ty) = result_types
             .iter()
             .find(|ty| ty.byte_size() > MAX_SLOT_BYTES)
@@ -4304,7 +4776,7 @@ fn lower_instruction_mem(
     };
 
     let trt_call = |builder: &mut FunctionBuilder,
-                    jit_module: &mut JITModule,
+                    jit_module: &mut dyn Module,
                     func_id: FuncId,
                     args: &[Value]|
      -> Value {
@@ -4903,12 +5375,7 @@ fn lower_instruction_mem(
                 .get(operand)
                 .cloned()
                 .unwrap_or(TensorType::scalar(ElementType::F64));
-            if src_ty.element_type == rt.element_type
-                || (matches!(src_ty.element_type, ElementType::I32 | ElementType::UI32)
-                    && matches!(rt.element_type, ElementType::I32 | ElementType::UI32))
-                || (matches!(src_ty.element_type, ElementType::I64 | ElementType::UI64)
-                    && matches!(rt.element_type, ElementType::I64 | ElementType::UI64))
-            {
+            if same_layout(src_ty.element_type, rt.element_type) {
                 // No-op Convert forwards the operand ptr; share pool
                 // ownership so the slot stays live for both vids.
                 if let Some(rv) = result_vid {
@@ -5665,6 +6132,7 @@ fn lower_instruction_mem(
                 &mut cond_vm,
                 &mut cond_tm,
                 HashMap::new(),
+                None,
             )?;
 
             let cond_val = {
@@ -5709,6 +6177,7 @@ fn lower_instruction_mem(
                 &mut body_vm,
                 &mut body_tm,
                 HashMap::new(),
+                None,
             )?;
 
             if let Some(ret_ir) = loop_body
@@ -6193,6 +6662,7 @@ fn lower_instruction_mem(
                     &mut br_vm,
                     &mut br_tm,
                     HashMap::new(),
+                    None,
                 )?;
 
                 if let Some(ret_ir) = branch
@@ -6223,9 +6693,16 @@ fn lower_instruction_mem(
                 .map(|s| LaneRepr::scalar(vec![s]))
                 .collect())
         }
-        Instruction::CustomCall { call_target, .. } => {
-            Err(format!("mem: custom_call not yet supported: {call_target}"))
-        }
+        Instruction::CustomCall { .. } => lower_mem_custom_call(
+            builder,
+            instr,
+            result_types,
+            jit_module,
+            value_map,
+            type_map,
+            pool,
+            result_vid,
+        ),
 
         Instruction::Return { .. } => Ok(vec![]),
 
@@ -7008,7 +7485,7 @@ fn lower_callee_body(
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
     external_data_ids: &HashMap<String, DataId>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     block_params: &[Value],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
@@ -7095,7 +7572,7 @@ fn lower_body(
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
     external_data_ids: &HashMap<String, DataId>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
 ) -> Result<(), String> {
@@ -7120,12 +7597,32 @@ fn lower_body(
             value_map,
             type_map,
         )?;
+        check_lane_counts(&ir.instr, &result_vals, &result_types)?;
 
         for (i, (vid, ty)) in ir.values.iter().enumerate() {
             if i < result_vals.len() {
                 value_map.insert(*vid, result_vals[i].clone());
                 type_map.insert(*vid, ty.clone());
             }
+        }
+    }
+    Ok(())
+}
+
+/// Consumers index lanes by their operand's type, so a result short of its type's element
+/// count would be read past or padded silently.
+fn check_lane_counts(
+    instr: &Instruction,
+    results: &[LaneRepr],
+    types: &[TensorType],
+) -> Result<(), String> {
+    for (lanes, ty) in results.iter().zip(types) {
+        if lanes.len() != ty.num_elements() {
+            return Err(format!(
+                "{} produced {} lanes for {ty}",
+                crate::useinfo::instr_kind(instr),
+                lanes.len()
+            ));
         }
     }
     Ok(())
@@ -7153,7 +7650,7 @@ fn lower_instruction(
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
     external_data_ids: &HashMap<String, DataId>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
 ) -> Result<Vec<LaneRepr>, String> {
@@ -7279,10 +7776,8 @@ fn lower_instruction(
             let out = elementwise_binop(builder, l, r, |b, a, c| {
                 if is_float(et) {
                     b.ins().fdiv(a, c)
-                } else if is_unsigned(et) {
-                    b.ins().udiv(a, c)
                 } else {
-                    b.ins().sdiv(a, c)
+                    int_div_rem(b, a, c, is_unsigned(et), false)
                 }
             });
             Ok(vec![LaneRepr::scalar(out)])
@@ -7576,19 +8071,10 @@ fn lower_instruction(
             } else {
                 let l = get_vals(builder, value_map, lhs)?.to_vec();
                 let r = get_vals(builder, value_map, rhs)?.to_vec();
-                let n = l.len().max(r.len());
                 let unsigned = is_unsigned(rt.element_type);
-                let out: Vec<Value> = (0..n)
-                    .map(|i| {
-                        let lv = if i < l.len() { l[i] } else { l[0] };
-                        let rv = if i < r.len() { r[i] } else { r[0] };
-                        if unsigned {
-                            builder.ins().urem(lv, rv)
-                        } else {
-                            builder.ins().srem(lv, rv)
-                        }
-                    })
-                    .collect();
+                let out = elementwise_binop(builder, &l, &r, |b, x, d| {
+                    int_div_rem(b, x, d, unsigned, true)
+                });
                 Ok(vec![LaneRepr::scalar(out)])
             }
         }
@@ -7764,20 +8250,7 @@ fn lower_instruction(
         // ----- Shape ops -----
         Instruction::Reshape { operand } => {
             let vals = get_vals(builder, value_map, operand)?.to_vec();
-            let n = rt.num_elements();
-            let out = if vals.len() == n {
-                vals
-            } else if vals.len() > n {
-                vals[..n].to_vec()
-            } else {
-                let mut out = vals;
-                let ct = cranelift_type_for(rt.element_type);
-                while out.len() < n {
-                    out.push(builder.ins().iconst(ct, 0));
-                }
-                out
-            };
-            Ok(vec![LaneRepr::scalar(out)])
+            Ok(vec![LaneRepr::scalar(vals)])
         }
 
         Instruction::BroadcastInDim {
@@ -8711,7 +9184,7 @@ fn lower_while(
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
     external_data_ids: &HashMap<String, DataId>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
 ) -> Result<Vec<LaneRepr>, String> {
@@ -8924,7 +9397,7 @@ fn lower_case(
     trt_ids: &TensorRtIds,
     func_abis: &HashMap<String, FuncAbi>,
     external_data_ids: &HashMap<String, DataId>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
 ) -> Result<Vec<LaneRepr>, String> {
@@ -9038,7 +9511,7 @@ fn lower_call(
     ir_module: &crate::ir::Module,
     func_ids: &HashMap<String, FuncId>,
     func_abis: &HashMap<String, FuncAbi>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     value_map: &mut HashMap<ValueId, LaneRepr>,
 ) -> Result<Vec<LaneRepr>, String> {
     let fid = func_ids
@@ -9248,6 +9721,48 @@ fn scalar_to_cranelift(builder: &mut FunctionBuilder, sv: &ScalarValue, et: Elem
         ElementType::I32 | ElementType::UI32 => builder.ins().iconst(types::I32, sv.as_i64()),
         ElementType::I1 => builder.ins().iconst(types::I8, sv.as_i64()),
     }
+}
+
+/// Integer `x / d` or `x % d` with XLA's results where the instruction would trap: `x / 0` is
+/// all ones and `x % 0` is `x`; signed `MIN / -1` is `MIN` and `MIN % -1` is 0.
+fn int_div_rem(
+    builder: &mut FunctionBuilder,
+    x: Value,
+    d: Value,
+    unsigned: bool,
+    rem: bool,
+) -> Value {
+    let ty = builder.func.dfg.value_type(x);
+    // `iconst` takes narrow immediates zero-extended.
+    let ones = if ty.bits() == 64 {
+        -1
+    } else {
+        (1i64 << ty.bits()) - 1
+    };
+    let zero = builder.ins().icmp_imm(IntCC::Equal, d, 0);
+    let mut trapping = zero;
+    if !unsigned {
+        let min = builder.ins().iconst(ty, (1u64 << (ty.bits() - 1)) as i64);
+        let neg_one = builder.ins().iconst(ty, ones);
+        let x_min = builder.ins().icmp(IntCC::Equal, x, min);
+        let d_neg_one = builder.ins().icmp(IntCC::Equal, d, neg_one);
+        let overflow = builder.ins().band(x_min, d_neg_one);
+        trapping = builder.ins().bor(zero, overflow);
+    }
+    let one = builder.ins().iconst(ty, 1);
+    let divisor = builder.ins().select(trapping, one, d);
+    let out = match (rem, unsigned) {
+        (false, true) => builder.ins().udiv(x, divisor),
+        (false, false) => builder.ins().sdiv(x, divisor),
+        (true, true) => builder.ins().urem(x, divisor),
+        (true, false) => builder.ins().srem(x, divisor),
+    };
+    let at_zero = if rem {
+        x
+    } else {
+        builder.ins().iconst(ty, ones)
+    };
+    builder.ins().select(zero, at_zero, out)
 }
 
 fn elementwise_binop(
@@ -9525,7 +10040,7 @@ fn lower_libm_unary(
     value_map: &mut HashMap<ValueId, LaneRepr>,
     operand: &ValueId,
     func_id: FuncId,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
     let vals = get_vals(builder, value_map, operand)?.to_vec();
     let func_ref = jit_module.declare_func_in_func(func_id, builder.func);
@@ -9567,7 +10082,7 @@ fn lower_trt_simd_unary_f64(
     value_map: &mut HashMap<ValueId, LaneRepr>,
     operand: &ValueId,
     trt_fn_id: FuncId,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
     let vals = get_vals(builder, value_map, operand)?.to_vec();
     let n = vals.len();
@@ -9611,7 +10126,7 @@ fn lower_trt_simd_binary_f64(
     lhs: &ValueId,
     rhs: &ValueId,
     trt_fn_id: FuncId,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
     let l = get_vals(builder, value_map, lhs)?.to_vec();
     let r = get_vals(builder, value_map, rhs)?.to_vec();
@@ -9662,7 +10177,7 @@ fn lower_libm_binary(
     lhs: &ValueId,
     rhs: &ValueId,
     func_id: FuncId,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
     let l = get_vals(builder, value_map, lhs)?.to_vec();
     let r = get_vals(builder, value_map, rhs)?.to_vec();
@@ -9799,7 +10314,7 @@ fn broadcast_values(
                 src_flat += idx * src_strides[pos];
             }
         }
-        out.push(vals[src_flat.min(vals.len() - 1)]);
+        out.push(vals[src_flat]);
     }
     out
 }
@@ -9901,9 +10416,7 @@ fn slice_tensor(vals: &[Value], src_shape: &[i64], starts: &[i64], limits: &[i64
             let src_coord = coord + starts.get(d).copied().unwrap_or(0) as usize;
             src_flat += src_coord * src_strides[d];
         }
-        if src_flat < vals.len() {
-            out.push(vals[src_flat]);
-        }
+        out.push(vals[src_flat]);
     }
     out
 }
@@ -10263,7 +10776,7 @@ fn lower_transpose(
     permutation: &[i64],
 ) -> TensorVals {
     let n = out_ty.num_elements();
-    if vals.len() != n || src_ty.shape.len() != permutation.len() {
+    if src_ty.shape.len() != permutation.len() {
         return vals.to_vec();
     }
 
@@ -10434,6 +10947,105 @@ fn lower_dynamic_update_slice(
     results
 }
 
+/// Lowers a LAPACK call of a pointer-ABI function through its scalar-ABI code one matrix of
+/// the stack at a time, so only that matrix's lanes are live across the host call.
+#[allow(clippy::too_many_arguments)]
+fn lower_mem_custom_call(
+    builder: &mut FunctionBuilder,
+    instr: &Instruction,
+    result_types: &[TensorType],
+    jit_module: &mut dyn Module,
+    value_map: &mut HashMap<ValueId, LaneRepr>,
+    type_map: &HashMap<ValueId, TensorType>,
+    pool: &mut crate::slot_pool::SlotPool,
+    result_vid: Option<ValueId>,
+) -> Result<Vec<LaneRepr>, String> {
+    let Instruction::CustomCall {
+        call_target,
+        operands,
+        backend_config,
+    } = instr
+    else {
+        unreachable!("lower_mem_custom_call on {instr:?}");
+    };
+    let flags = MemFlags::trusted();
+    let mut srcs = Vec::with_capacity(operands.len());
+    for vid in operands {
+        let ty = type_map
+            .get(vid)
+            .cloned()
+            .ok_or_else(|| format!("mem: missing type for {vid:?}"))?;
+        let ptr = value_map
+            .get_mut(vid)
+            .ok_or_else(|| format!("mem: missing value {vid:?}"))?
+            .as_scalar_or_spill(builder)[0];
+        srcs.push((*vid, ptr, ty));
+    }
+    // Every operand and result of a batched LAPACK call shares the leading batch dims.
+    let stack = srcs.first().map_or(&[][..], |(_, _, ty)| {
+        &ty.shape[..ty.rank().saturating_sub(2)]
+    });
+    let batch_dims = stack.len();
+    let batch = stack.iter().product::<i64>() as usize;
+    let matrix = |ty: &TensorType| TensorType {
+        shape: ty.shape[batch_dims..].to_vec(),
+        element_type: ty.element_type,
+    };
+    let matrix_types: HashMap<ValueId, TensorType> =
+        srcs.iter().map(|(vid, _, ty)| (*vid, matrix(ty))).collect();
+    let matrix_results: Vec<TensorType> = result_types.iter().map(matrix).collect();
+    let dsts: Vec<Value> = result_types
+        .iter()
+        .enumerate()
+        .map(|(i, ty)| match i {
+            0 => alloc_slot_for_vid(builder, pool, result_vid, ty.byte_size()),
+            _ => alloc_slot(builder, ty.byte_size()),
+        })
+        .collect();
+    for b in 0..batch {
+        let mut lanes = HashMap::new();
+        for (vid, ptr, ty) in &srcs {
+            let (n, sz) = (
+                matrix_types[vid].num_elements(),
+                ty.element_type.byte_size(),
+            );
+            let ct = cranelift_type_for(ty.element_type);
+            let vals = (0..n)
+                .map(|i| {
+                    builder
+                        .ins()
+                        .load(ct, flags, *ptr, ((b * n + i) * sz) as i32)
+                })
+                .collect();
+            lanes.insert(*vid, LaneRepr::scalar(vals));
+        }
+        let outs = lower_custom_call(
+            builder,
+            call_target,
+            operands,
+            &matrix_results,
+            &mut lanes,
+            &matrix_types,
+            jit_module,
+            backend_config,
+        )?;
+        check_lane_counts(instr, &outs, &matrix_results)?;
+        for ((mut out, ty), dst) in outs.into_iter().zip(&matrix_results).zip(&dsts) {
+            out.unpack_in(builder);
+            let (n, sz) = (ty.num_elements(), ty.element_type.byte_size());
+            for (j, &v) in out.as_scalar().iter().enumerate() {
+                builder
+                    .ins()
+                    .store(flags, v, *dst, ((b * n + j) * sz) as i32);
+            }
+        }
+    }
+    Ok(dsts
+        .into_iter()
+        .map(|dst| LaneRepr::scalar(vec![dst]))
+        .collect())
+}
+
 fn lower_custom_call(
     builder: &mut FunctionBuilder,
     call_target: &str,
@@ -10441,7 +11053,7 @@ fn lower_custom_call(
     result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &HashMap<ValueId, TensorType>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     backend_config: &HashMap<String, i64>,
 ) -> Result<Vec<LaneRepr>, String> {
     if call_target.starts_with("lapack_dgesdd") {
@@ -11023,7 +11635,7 @@ fn lapack_slot(
 
 fn lapack_call(
     builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     symbol: &str,
     param_types: &[cranelift_codegen::ir::Type],
     args: &[cranelift_codegen::ir::Value],
@@ -11057,15 +11669,14 @@ fn lower_svd_custom_call(
     result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     _type_map: &HashMap<ValueId, TensorType>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
-    let a_vals = get_vals(builder, value_map, &operands[0])?;
-    let n = require_square("SVD", a_vals)?;
+    let a_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
+    let (batch, n) = square_stack("SVD", &result_types[0], a_vals.len())?;
     let f8 = 8;
 
     let (a_b, u_b, s_b, vt_b, info_b) = (n * n * f8, n * n * f8, n * f8, n * n * f8, 4);
     let (_, base) = lapack_slot(builder, a_b + u_b + s_b + vt_b + info_b);
-    store_f64_vals(builder, a_vals, base, 0);
 
     let u_off = a_b as i32;
     let s_off = (a_b + u_b) as i32;
@@ -11078,27 +11689,33 @@ fn lower_svd_custom_call(
 
     let n_val = builder.ins().iconst(types::I64, n as i64);
     let pt = ptr_type();
-    lapack_call(
-        builder,
-        jit_module,
-        "__cranelift_svd",
-        &[pt, types::I64, pt, pt, pt, pt],
-        &[base, n_val, u_ptr, s_ptr, vt_ptr, info_ptr],
-    )?;
+    let (mut u, mut s, mut vt, mut info) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for b in 0..batch {
+        store_f64_vals(builder, &a_vals[b * n * n..(b + 1) * n * n], base, 0);
+        lapack_call(
+            builder,
+            jit_module,
+            "__cranelift_svd",
+            &[pt, types::I64, pt, pt, pt, pt],
+            &[base, n_val, u_ptr, s_ptr, vt_ptr, info_ptr],
+        )?;
+        u.extend(load_f64_vals(builder, n * n, base, u_off));
+        s.extend(load_f64_vals(builder, n, base, s_off));
+        vt.extend(load_f64_vals(builder, n * n, base, vt_off));
+        info.push(load_info_i32(builder, base, info_off));
+    }
 
     // XLA dgesdd_ffi convention: (A_overwritten, sigma, U, VT, info)
     let mut result_groups = vec![
-        load_f64_scalar_lane(builder, n * n, base, u_off),
-        load_f64_scalar_lane(builder, n, base, s_off),
-        load_f64_scalar_lane(builder, n * n, base, u_off),
+        LaneRepr::scalar(u.clone()),
+        LaneRepr::scalar(s),
+        LaneRepr::scalar(u),
     ];
     if result_types.len() > 3 {
-        result_groups.push(load_f64_scalar_lane(builder, n * n, base, vt_off));
+        result_groups.push(LaneRepr::scalar(vt));
     }
     if result_types.len() > 4 {
-        result_groups.push(LaneRepr::scalar(vec![load_info_i32(
-            builder, base, info_off,
-        )]));
+        result_groups.push(LaneRepr::scalar(info));
     }
     Ok(result_groups)
 }
@@ -11115,13 +11732,23 @@ fn matrix_stack(name: &str, ty: &TensorType) -> Result<(usize, usize, usize), St
     }
 }
 
+/// `(batch, n)` of a stack of `n x n` matrices holding `len` elements.
+fn square_stack(name: &str, ty: &TensorType, len: usize) -> Result<(usize, usize), String> {
+    match matrix_stack(name, ty)? {
+        (batch, rows, n) if rows == n && batch * n * n == len => Ok((batch, n)),
+        _ => Err(format!(
+            "{name}: expected a stack of square matrices, got {ty}"
+        )),
+    }
+}
+
 fn lower_lu_custom_call(
     builder: &mut FunctionBuilder,
     operands: &[ValueId],
     result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     _type_map: &HashMap<ValueId, TensorType>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
     let a_vals = get_vals(builder, value_map, &operands[0])?;
     let (batch, m, n) = matrix_stack("LU", &result_types[0])?;
@@ -11175,7 +11802,7 @@ fn lower_trsm_custom_call(
     result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     _type_map: &HashMap<ValueId, TensorType>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     backend_config: &HashMap<String, i64>,
 ) -> Result<Vec<LaneRepr>, String> {
     let a_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
@@ -11243,7 +11870,7 @@ fn lower_cholesky_custom_call(
     _result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &HashMap<ValueId, TensorType>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     backend_config: &HashMap<String, i64>,
 ) -> Result<Vec<LaneRepr>, String> {
     // Decode `uplo` from the custom_call's backend_config: ASCII 'L' (76) =>
@@ -11324,20 +11951,21 @@ fn lower_qr_custom_call(
     result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     _type_map: &HashMap<ValueId, TensorType>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
-    let a_vals = get_vals(builder, value_map, &operands[0])?;
-    let rt = &result_types[0];
-    let (m, n) = if rt.shape.len() == 2 {
-        (rt.shape[0] as usize, rt.shape[1] as usize)
-    } else {
-        return Err("QR: expected 2D result".to_string());
-    };
+    let a_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
+    let (batch, m, n) = matrix_stack("QR", &result_types[0])?;
+    if a_vals.len() != batch * m * n {
+        return Err(format!(
+            "QR: operand has {} elements, expected {}",
+            a_vals.len(),
+            result_types[0]
+        ));
+    }
     let f8 = 8;
 
     let (a_b, qr_b, tau_b) = (m * n * f8, m * n * f8, m.min(n) * f8);
     let (_, base) = lapack_slot(builder, a_b + qr_b + tau_b);
-    store_f64_vals(builder, a_vals, base, 0);
 
     let qr_off = a_b as i32;
     let tau_off = (a_b + qr_b) as i32;
@@ -11347,18 +11975,21 @@ fn lower_qr_custom_call(
     let m_val = builder.ins().iconst(types::I64, m as i64);
     let n_val = builder.ins().iconst(types::I64, n as i64);
     let pt = ptr_type();
-    lapack_call(
-        builder,
-        jit_module,
-        "__cranelift_qr",
-        &[pt, types::I64, types::I64, pt, pt],
-        &[base, m_val, n_val, qr_ptr, tau_ptr],
-    )?;
+    let (mut qr, mut tau) = (Vec::new(), Vec::new());
+    for b in 0..batch {
+        store_f64_vals(builder, &a_vals[b * m * n..(b + 1) * m * n], base, 0);
+        lapack_call(
+            builder,
+            jit_module,
+            "__cranelift_qr",
+            &[pt, types::I64, types::I64, pt, pt],
+            &[base, m_val, n_val, qr_ptr, tau_ptr],
+        )?;
+        qr.extend(load_f64_vals(builder, m * n, base, qr_off));
+        tau.extend(load_f64_vals(builder, m.min(n), base, tau_off));
+    }
 
-    Ok(vec![
-        load_f64_scalar_lane(builder, m * n, base, qr_off),
-        load_f64_scalar_lane(builder, m.min(n), base, tau_off),
-    ])
+    Ok(vec![LaneRepr::scalar(qr), LaneRepr::scalar(tau)])
 }
 
 fn lower_orgqr_custom_call(
@@ -11367,24 +11998,18 @@ fn lower_orgqr_custom_call(
     result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     _type_map: &HashMap<ValueId, TensorType>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
     let qr_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
     let tau_vals = get_vals(builder, value_map, &operands[1])?.to_vec();
 
-    let rt = &result_types[0];
-    let (m, n) = if rt.shape.len() == 2 {
-        (rt.shape[0] as usize, rt.shape[1] as usize)
-    } else {
-        return Err("ORGQR: expected 2D result".to_string());
-    };
+    let (batch, m, n) = matrix_stack("ORGQR", &result_types[0])?;
+    let (qr_len, tau_len) = (qr_vals.len() / batch.max(1), tau_vals.len() / batch.max(1));
     let f8 = 8;
 
-    let (qr_b, tau_b, q_b) = (qr_vals.len() * f8, tau_vals.len() * f8, m * n * f8);
+    let (qr_b, tau_b, q_b) = (qr_len * f8, tau_len * f8, m * n * f8);
     let (_, base) = lapack_slot(builder, qr_b + tau_b + q_b);
-    store_f64_vals(builder, &qr_vals, base, 0);
     let tau_off = qr_b as i32;
-    store_f64_vals(builder, &tau_vals, base, tau_off);
     let q_off = (qr_b + tau_b) as i32;
     let tau_ptr = builder.ins().iadd_imm(base, tau_off as i64);
     let q_ptr = builder.ins().iadd_imm(base, q_off as i64);
@@ -11392,32 +12017,42 @@ fn lower_orgqr_custom_call(
     let m_val = builder.ins().iconst(types::I64, m as i64);
     let n_val = builder.ins().iconst(types::I64, n as i64);
     let pt = ptr_type();
-    lapack_call(
-        builder,
-        jit_module,
-        "__cranelift_orgqr",
-        &[pt, pt, types::I64, types::I64, pt],
-        &[base, tau_ptr, m_val, n_val, q_ptr],
-    )?;
+    let mut q = Vec::with_capacity(batch * m * n);
+    for b in 0..batch {
+        store_f64_vals(builder, &qr_vals[b * qr_len..(b + 1) * qr_len], base, 0);
+        store_f64_vals(
+            builder,
+            &tau_vals[b * tau_len..(b + 1) * tau_len],
+            base,
+            tau_off,
+        );
+        lapack_call(
+            builder,
+            jit_module,
+            "__cranelift_orgqr",
+            &[pt, pt, types::I64, types::I64, pt],
+            &[base, tau_ptr, m_val, n_val, q_ptr],
+        )?;
+        q.extend(load_f64_vals(builder, m * n, base, q_off));
+    }
 
-    Ok(vec![load_f64_scalar_lane(builder, m * n, base, q_off)])
+    Ok(vec![LaneRepr::scalar(q)])
 }
 
 fn lower_syevd_custom_call(
     builder: &mut FunctionBuilder,
     operands: &[ValueId],
-    _result_types: &[TensorType],
+    result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     _type_map: &HashMap<ValueId, TensorType>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
-    let a_vals = get_vals(builder, value_map, &operands[0])?;
-    let n = require_square("SYEVD", a_vals)?;
+    let a_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
+    let (batch, n) = square_stack("SYEVD", &result_types[0], a_vals.len())?;
     let f8 = 8;
 
     let (a_b, ev_b, ew_b, info_b) = (n * n * f8, n * n * f8, n * f8, 4);
     let (_, base) = lapack_slot(builder, a_b + ev_b + ew_b + info_b);
-    store_f64_vals(builder, a_vals, base, 0);
 
     let ev_off = a_b as i32;
     let ew_off = (a_b + ev_b) as i32;
@@ -11428,18 +12063,25 @@ fn lower_syevd_custom_call(
 
     let n_val = builder.ins().iconst(types::I64, n as i64);
     let pt = ptr_type();
-    lapack_call(
-        builder,
-        jit_module,
-        "__cranelift_syevd",
-        &[pt, types::I64, pt, pt, pt],
-        &[base, n_val, ev_ptr, ew_ptr, info_ptr],
-    )?;
+    let (mut ev, mut ew, mut info) = (Vec::new(), Vec::new(), Vec::new());
+    for b in 0..batch {
+        store_f64_vals(builder, &a_vals[b * n * n..(b + 1) * n * n], base, 0);
+        lapack_call(
+            builder,
+            jit_module,
+            "__cranelift_syevd",
+            &[pt, types::I64, pt, pt, pt],
+            &[base, n_val, ev_ptr, ew_ptr, info_ptr],
+        )?;
+        ev.extend(load_f64_vals(builder, n * n, base, ev_off));
+        ew.extend(load_f64_vals(builder, n, base, ew_off));
+        info.push(load_info_i32(builder, base, info_off));
+    }
 
     Ok(vec![
-        load_f64_scalar_lane(builder, n * n, base, ev_off),
-        load_f64_scalar_lane(builder, n, base, ew_off),
-        LaneRepr::scalar(vec![load_info_i32(builder, base, info_off)]),
+        LaneRepr::scalar(ev),
+        LaneRepr::scalar(ew),
+        LaneRepr::scalar(info),
     ])
 }
 
@@ -11479,7 +12121,7 @@ fn lower_gesv_custom_call(
     result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &HashMap<ValueId, TensorType>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
     let a_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
     let b_vals = get_vals(builder, value_map, &operands[1])?.to_vec();
@@ -11581,7 +12223,7 @@ fn lower_potrs_custom_call(
     result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &HashMap<ValueId, TensorType>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
     backend_config: &HashMap<String, i64>,
 ) -> Result<Vec<LaneRepr>, String> {
     let l_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
@@ -11698,7 +12340,7 @@ fn lower_gelsd_custom_call(
     result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &HashMap<ValueId, TensorType>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
     let a_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
     let b_vals = get_vals(builder, value_map, &operands[1])?.to_vec();
@@ -11821,7 +12463,7 @@ fn lower_geev_custom_call(
     result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     _type_map: &HashMap<ValueId, TensorType>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
     let a_vals = get_vals(builder, value_map, &operands[0])?;
     let n = require_square("GEEV", a_vals)?;
@@ -11916,7 +12558,7 @@ fn lower_gesvd_custom_call(
     operands: &[ValueId],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &HashMap<ValueId, TensorType>,
-    jit_module: &mut JITModule,
+    jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
     let a_vals = get_vals(builder, value_map, &operands[0])?;
     let a_ty = type_map.get(&operands[0]).ok_or("gesvd: missing A type")?;

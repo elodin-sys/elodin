@@ -117,6 +117,27 @@ def test_prepared_package_reuses_then_extends_coverage(tmp_path):
     validate_package(Path(spec["output"]), spec)
 
 
+def test_coverage_allows_a_json_rounding_ulp_but_not_a_real_gap(tmp_path):
+    spec = request(tmp_path)
+    prepare(spec, Source())
+    directory = Path(spec["output"])
+    manifest_path = directory / "prepared-region.json"
+    manifest = json.loads(manifest_path.read_text())
+    bounds = manifest["regions"][0]["bounds"]
+    manifest["regions"][0]["bounds"] = [value + 1e-8 for value in bounds[:2]] + [
+        value - 1e-8 for value in bounds[2:]
+    ]
+    manifest_path.write_text(json.dumps(manifest))
+    validate_package(directory, spec)
+
+    manifest["regions"][0]["bounds"] = [value + 0.01 for value in bounds[:2]] + [
+        value - 0.01 for value in bounds[2:]
+    ]
+    manifest_path.write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="cover"):
+        validate_package(directory, spec)
+
+
 def test_missing_or_changed_tile_fails_package_validation(tmp_path):
     spec = request(tmp_path)
     prepare(spec, Source())

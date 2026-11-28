@@ -4,7 +4,7 @@ use std::borrow::Cow;
 
 use crate::const_fold;
 use crate::interp::InterpError;
-use crate::ir::Module;
+use crate::ir::{InstrResult, Instruction, Module};
 use crate::parser;
 use thiserror::Error;
 
@@ -97,6 +97,15 @@ pub struct DisplayKernelExec {
 unsafe impl Send for DisplayKernelExec {}
 unsafe impl Sync for DisplayKernelExec {}
 
+fn custom_call(body: &[InstrResult]) -> Option<&str> {
+    body.iter().find_map(|ir| match &ir.instr {
+        Instruction::CustomCall { call_target, .. } => Some(call_target.as_str()),
+        instr => const_fold::nested_bodies(instr)
+            .into_iter()
+            .find_map(custom_call),
+    })
+}
+
 impl DisplayKernelExec {
     pub fn compile(
         mlir: &str,
@@ -119,6 +128,14 @@ impl DisplayKernelExec {
         let mut ir_module =
             parser::parse_module(mlir).map_err(|err| format!("MLIR parse failed: {err}"))?;
         const_fold::fold_module(&mut ir_module);
+        // The browser editor interprets display kernels, and the interpreter has no LAPACK.
+        if let Some(target) = ir_module
+            .functions
+            .iter()
+            .find_map(|f| custom_call(&f.body))
+        {
+            return Err(format!("display kernels cannot call {target}"));
+        }
         #[cfg(feature = "jit")]
         compile_module(&ir_module).map_err(|err| format!("Cranelift compile failed: {err}"))?;
         #[cfg(not(feature = "jit"))]

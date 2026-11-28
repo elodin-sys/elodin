@@ -788,14 +788,14 @@ fn binary(
             BinOp::Mul => x.wrapping_mul(y),
             BinOp::Div => {
                 if y == 0 {
-                    0
+                    -1
                 } else {
                     x.wrapping_div(y)
                 }
             }
             BinOp::Rem => {
                 if y == 0 {
-                    0
+                    x
                 } else {
                     x.wrapping_rem(y)
                 }
@@ -834,14 +834,14 @@ fn binary(
             BinOp::Mul => x.wrapping_mul(y),
             BinOp::Div => {
                 if y == 0 {
-                    0
+                    -1
                 } else {
                     x.wrapping_div(y)
                 }
             }
             BinOp::Rem => {
                 if y == 0 {
-                    0
+                    x
                 } else {
                     x.wrapping_rem(y)
                 }
@@ -878,8 +878,8 @@ fn binary(
             BinOp::Add => x.wrapping_add(y),
             BinOp::Sub => x.wrapping_sub(y),
             BinOp::Mul => x.wrapping_mul(y),
-            BinOp::Div => x.checked_div(y).unwrap_or(0),
-            BinOp::Rem => x.checked_rem(y).unwrap_or(0),
+            BinOp::Div => x.checked_div(y).unwrap_or(u64::MAX),
+            BinOp::Rem => x.checked_rem(y).unwrap_or(x),
             BinOp::Max => x.max(y),
             BinOp::Min => x.min(y),
             BinOp::Xor => x ^ y,
@@ -905,8 +905,8 @@ fn binary(
             BinOp::Add => x.wrapping_add(y),
             BinOp::Sub => x.wrapping_sub(y),
             BinOp::Mul => x.wrapping_mul(y),
-            BinOp::Div => x.checked_div(y).unwrap_or(0),
-            BinOp::Rem => x.checked_rem(y).unwrap_or(0),
+            BinOp::Div => x.checked_div(y).unwrap_or(u32::MAX),
+            BinOp::Rem => x.checked_rem(y).unwrap_or(x),
             BinOp::Max => x.max(y),
             BinOp::Min => x.min(y),
             BinOp::Xor => x ^ y,
