@@ -478,42 +478,31 @@ impl TelemetryCache {
             self.predecessors.remove(&id);
         }
         let after = dropped_anchor.map(|time| self.accounting_block(id, time));
-        let still_claimed: Vec<Timestamp> = self
+        let still_claimed: BTreeSet<_> = self
             .predecessors
             .get(&id)
-            .map(|claims| claims.values().copied().collect())
-            .unwrap_or_default();
-        let mut removed = Vec::new();
-        if let Some(series) = self.components.get(&id) {
-            for (time, value) in series {
-                let claimed = still_claimed.contains(time);
-                let remove = if dropped_anchor == Some(*time) {
-                    !claimed
-                } else if claimed {
-                    false
-                } else {
-                    time.0 >= start && time.0 < end
-                };
-                if remove {
-                    let block = if dropped_anchor == Some(*time) {
-                        before.unwrap_or_else(|| block_start(time.0))
-                    } else {
-                        block_start(time.0)
-                    };
-                    removed.push((*time, block, Self::value_bytes(value)));
-                }
+            .into_iter()
+            .flat_map(|claims| claims.values().copied())
+            .collect();
+        let mut removed_bytes = BTreeMap::<i64, usize>::new();
+        if let Some(series) = self.components.get_mut(&id) {
+            // A hold can sit outside the evicted interval. Charge its removal
+            // to the block that owned it before we dropped the claim.
+            if let (Some(time), Some(block)) = (dropped_anchor, before)
+                && !still_claimed.contains(&time)
+                && let Some(value) = series.remove(&time)
+            {
+                removed_bytes.insert(block, Self::value_bytes(&value));
+            }
+            for (time, value) in series.extract_if(Timestamp(start)..Timestamp(end), |time, _| {
+                !still_claimed.contains(time)
+            }) {
+                *removed_bytes.entry(block_start(time.0)).or_default() += Self::value_bytes(&value);
             }
         }
-        if let Some(series) = self.components.get_mut(&id) {
-            series.retain(|time, _| {
-                !removed
-                    .iter()
-                    .any(|(removed_time, _, _)| removed_time == time)
-            });
-        }
-        for (_, block, bytes) in &removed {
-            self.resident_bytes = self.resident_bytes.saturating_sub(*bytes);
-            self.sub_block_bytes(id, *block, *bytes);
+        for (block, bytes) in removed_bytes {
+            self.resident_bytes = self.resident_bytes.saturating_sub(bytes);
+            self.sub_block_bytes(id, block, bytes);
         }
         if let (Some(time), Some(from), Some(to)) = (dropped_anchor, before, after)
             && from != to
